@@ -46,8 +46,6 @@ Claude Code fires the `Stop` hook every time a session ends. The hook:
 mkdir -p ~/.claude/scripts
 cp v2/export-session.sh ~/.claude/scripts/export-session.sh
 chmod +x ~/.claude/scripts/export-session.sh
-
-# 2. Wire it into ~/.claude/settings.json
 ```
 
 Add to `~/.claude/settings.json`:
@@ -70,17 +68,29 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-The script auto-detects the output directory: uses `{cwd}/docs/sessions/` if it exists, otherwise `~/.claude/sessions/`.
+## Where Do My Exported Files Go?
+
+The script detects the output directory in this order:
+
+| Condition | Output location |
+|---|---|
+| `{cwd}/docs/sessions/` exists | `{cwd}/docs/sessions/{session_id}.md` |
+| `{cwd}/docs/` exists (no sessions subfolder) | Creates `{cwd}/docs/sessions/` and writes there |
+| No `docs/` folder found | Falls back to `~/.claude/sessions/{session_id}.md` |
+
+`SESSION_INDEX.md` is written to the same directory as the session files.
+
+**Note on committing session files:** The exported `*.md` files in `docs/sessions/` can get large. You may want to add `docs/sessions/` to your `.gitignore` or commit selectively.
 
 ## SESSION_INDEX.md
 
 After export, `docs/sessions/SESSION_INDEX.md` looks like:
 
 ```
-| ID         | Date       | Branch        | Summary                                              | File |
-|------------|------------|---------------|------------------------------------------------------|------|
-| 021f1273…  | 2026-06-21 | deploy/test   | Translating item titles for company 66 to production | 021f1273….md |
-| 826db1cf…  | 2026-06-27 | feature/PRD-021 | PRD-021 agent permission system fully implemented  | 826db1cf….md |
+| ID         | Date       | Branch          | Summary                                              | File |
+|------------|------------|-----------------|------------------------------------------------------|------|
+| 021f1273…  | 2026-06-21 | deploy/test     | Translating item titles for company 66 to production | 021f1273….md |
+| 826db1cf…  | 2026-06-27 | feature/PRD-021 | PRD-021 agent permission system fully implemented    | 826db1cf….md |
 ```
 
 Search: `grep "company 66" docs/sessions/SESSION_INDEX.md` — one result, instant.
@@ -100,12 +110,19 @@ When you rewind mid-session or use `/branch`, Claude Code creates a new session 
 
 ## Bulk Migration
 
-To re-export all existing sessions for a project:
+To re-export all existing sessions for a project, run this from your terminal:
 
 ```bash
-find ~/.claude/projects/-home-ali-empty-Regal-regal-backend -name "*.jsonl" | while read f; do
+# Replace <PROJECT_SLUG> with your actual ~/.claude/projects/ directory name
+# (run `ls ~/.claude/projects/` to find it — it's your project path with / replaced by -)
+PROJECT_SLUG="<PROJECT_SLUG>"
+PROJECT_CWD="/path/to/your/project"  # absolute path to your project root
+
+find ~/.claude/projects/$PROJECT_SLUG -name "*.jsonl" | while read f; do
     sid=$(basename "$f" .jsonl)
-    payload="{\"session_id\": \"$sid\", \"cwd\": \"/home/ali/empty/Regal/regal_backend\"}"
+    payload="{\"session_id\": \"$sid\", \"cwd\": \"$PROJECT_CWD\"}"
     echo "$payload" | bash ~/.claude/scripts/export-session.sh 2>/dev/null
 done
 ```
+
+Example: if your project is at `/home/you/myapp`, the slug is likely `-home-you-myapp`.

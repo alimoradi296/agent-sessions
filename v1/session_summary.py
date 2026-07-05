@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-REPO = Path("/home/ali/empty/Regal/regal_backend")
+REPO = Path("/path/to/your/project")  # EDIT THIS: absolute path to your project root
 LOG_FILE = REPO / "docs" / "SESSION_LOG.md"
 
 
