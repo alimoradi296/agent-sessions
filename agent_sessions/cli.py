@@ -65,12 +65,14 @@ def cmd_hook(args: argparse.Namespace) -> None:
     except (json.JSONDecodeError, ValueError):
         return
 
-    session_id = payload.get("session_id", "")
-    cwd = payload.get("cwd", "")
+    agent_name = getattr(args, "agent", None) or "claude"
+    session_id = payload.get("session_id") or payload.get("sessionId") or payload.get("id", "")
+    cwd = payload.get("cwd") or payload.get("workspaceFolder", "")
+
     if not session_id:
         return
 
-    parser_cls = PARSERS.get("claude")
+    parser_cls = PARSERS.get(agent_name)
     if not parser_cls:
         return
 
@@ -301,7 +303,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     # hook (stdin-driven, used by Stop hooks)
-    sub.add_parser("hook", help="Hook entry point (reads JSON from stdin)")
+    p_hook = sub.add_parser("hook", help="Hook entry point (reads JSON from stdin)")
+    p_hook.add_argument("--agent", choices=list(PARSERS.keys()), default="claude", help="Which agent (default: claude)")
 
     # export
     p_export = sub.add_parser("export", help="Export a single session")
