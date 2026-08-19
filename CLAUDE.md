@@ -1,60 +1,66 @@
-# claude-session-exporter — Claude Instructions
+# agent-sessions — Claude Instructions
 
 ## What This Repo Is
 
-A Claude Code Stop hook that exports session transcripts as deduplicated, searchable Markdown files. Two versions: v1 (original, naive) and v2 (current, smart).
+A universal AI agent session exporter. Parses JSONL transcripts from Claude Code, Codex, and Cursor into deduplicated, searchable Markdown with a shared index.
 
 ## Structure
 
 ```
-v1/
-  export-session.sh     — original: writes {timestamp}-{session_id}.md on every stop
-  session_summary.py    — original companion: writes one line to SESSION_LOG.md
-v2/
-  export-session.sh     — current: writes {session_id}.md (deduped), builds SESSION_INDEX.md
-README.md               — full design rationale, installation, format docs
-CLAUDE.md               — this file
+agent_sessions/
+  __init__.py         — package root, exports public API
+  __main__.py         — `python3 -m agent_sessions` entry
+  models.py           — Session, Message, TokenUsage, ToolCall dataclasses
+  cli.py              — argparse CLI: hook, export, bulk, search, stats, install
+  parsers/
+    __init__.py       — PARSERS registry dict
+    claude.py         — Claude Code JSONL parser
+    codex.py          — Codex CLI JSONL parser
+    cursor.py         — Cursor IDE JSONL parser
+  renderers/
+    __init__.py
+    markdown.py       — Session → {session_id}.md
+    index.py          — Session → SESSION_INDEX.md (one line per session)
+    json_index.py     — Session → sessions.json (machine-readable)
+v1/                   — original naive implementation (preserved for history)
+v2/                   — claude-only smart implementation (preserved for history)
 ```
 
 ## Key Design Decisions (Do Not Revert)
 
-- **Filename is `{session_id}.md`, not `{timestamp}-{session_id}.md`** — the timestamp naming caused hundreds of duplicate files for the same session. Overwriting on re-export is intentional.
-- **`away_summary` system events are the real summary** — they contain Claude's own state description mid-session, far more useful than git log output. Always prefer the last one (most complete).
-- **`forkedFrom` is the rewind/branch link** — every message in a rewound session carries `forkedFrom: {sessionId, messageUuid}`. Read it from the first message.
-- **`SESSION_INDEX.md` is the search interface** — one line per session, grep-able. Never replace this with a full-text search scheme; the index is intentionally lightweight.
-- **No deletion of old files** — when migrating from v1 to v2, keep the old timestamp-named files. The new UUID-named files coexist with them.
+- **Parser/renderer split** — parsers return a `Session` dataclass, renderers consume it. Adding a new agent = one new parser file. Never put agent-specific logic in renderers.
+- **Filename is `{session_id}.md`** — overwrite on re-export, no duplicates.
+- **`away_summary` is the real summary** (Claude only) — prefer last one (most complete).
+- **`forkedFrom` is the rewind/branch link** — read from first message in Claude sessions.
+- **`SESSION_INDEX.md` stays one line per session** — grep-able. Never turn it into a full transcript.
+- **`sessions.json` is the programmatic interface** — all metadata, tokens, durations. Markdown is for humans.
+- **Token usage is cumulative** — Codex gives `total_token_usage` snapshots (use last one). Claude gives per-message usage (sum all).
+- **No external dependencies** — stdlib only. This must run on any machine with Python 3.10+.
 
-## JSONL Event Types That Matter
+## JSONL Format Reference
 
-| Type | Field | Purpose |
-|---|---|---|
-| `ai-title` | `aiTitle` | Session title (human-readable topic) |
-| `system` | `subtype == "away_summary"`, `content` | Claude's own state summary — best source for index entry |
-| `user` / `assistant` | `forkedFrom` | Present on all messages if session was a rewind/branch — contains `{sessionId, messageUuid}` of parent |
-| `user` / `assistant` | `gitBranch`, `cwd` | Git branch and working directory at message time |
-| `user` / `assistant` | `isSidechain` | If true, skip — these are tool-use sidechains, not the main conversation |
+### Claude Code
+- Location: `~/.claude/projects/<slug>/<session_id>.jsonl`
+- Key events: `user`, `assistant`, `ai-title`, `custom-title`, `system` (subtype=`away_summary`), `attachment`
+- Messages carry: `forkedFrom`, `gitBranch`, `cwd`, `timestamp`, `usage`, `model`, `isSidechain`
+
+### Codex
+- Location: `~/.codex/sessions/YYYY/MM/DD/rollout-<datetime>-<session_id>.jsonl`
+- Wrapper: `{"type": "...", "payload": {...}}`
+- Key event types: `session_meta`, `event_msg` (subtypes: `task_started`, `turn_completed`, `turn_aborted`, `user_message`, `agent_message`, `token_count`), `response_item`
+- Thread names in: `~/.codex/session_index.jsonl`
+
+### Cursor
+- Location: `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`
+- Minimal format: `{"role": "user"|"assistant", "message": {"content": [...]}}`
+- Also: `{"type": "turn_ended", "status": "success"|"aborted"}`
+- No timestamps, no branch, no usage data in JSONL
 
 ## What NOT to Do
 
-- Do not add timestamp to the output filename — defeats deduplication
-- Do not use git log as the session summary — it tracks commits, not what happened in the session
-- Do not remove the `<details>` block for earlier away_summaries — they show the session's progression
-- Do not make `SESSION_INDEX.md` a full transcript — it must stay one line per session for grep to work
-- Do not sort the index alphabetically — newest-first insertion order is how you find recent sessions
-
-## Testing
-
-To test against a real session:
-```bash
-python3 -c "
-import json, subprocess
-payload = json.dumps({'session_id': '<session_id>', 'cwd': '<project_cwd>'})
-result = subprocess.run(['bash', 'v2/export-session.sh'], input=payload, capture_output=True, text=True)
-print(result.stdout)
-print(result.stderr)
-"
-```
-
-## Installation Path
-
-The live version runs at `~/.claude/scripts/export-session.sh`, wired via `~/.claude/settings.json` Stop hook. See README.md for full installation steps.
+- Do not add external dependencies — stdlib only
+- Do not put agent-specific logic in renderers
+- Do not add timestamp to output filenames
+- Do not sort the index alphabetically — newest-first insertion order
+- Do not remove v1/ or v2/ — they document the evolution
+- Do not hardcode paths — use Path.home() and the resolution chain

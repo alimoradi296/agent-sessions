@@ -1,128 +1,158 @@
-# claude-session-exporter
+# agent-sessions
 
-A Claude Code Stop hook that exports session transcripts as searchable, deduplicated Markdown files with a live index.
+Universal AI agent session exporter. Turns raw JSONL transcripts from Claude Code, Codex, and Cursor into searchable, deduplicated Markdown files with a live index.
 
 ## The Problem
 
-Claude Code saves raw `.jsonl` transcripts internally but provides no human-readable export. Without this hook:
-- Sessions accumulate as `{timestamp}-{session_id}.md` — the same session gets re-exported on every stop, creating dozens of duplicates
-- No way to find "what session covered topic X" without `grep`-ing hundreds of files
+Every AI coding agent stores session transcripts in its own format, in its own location. None of them give you a human-readable, searchable archive. Without this tool:
+
+- Sessions pile up as opaque JSONL files across `~/.claude/`, `~/.codex/`, `~/.cursor/`
+- No way to find "what session covered topic X" without grep archaeology
+- No duration, token usage, or cost tracking per session
 - Rewinds/branches have no link back to their parent session
-- The `away_summary` field (Claude's own mid-session state description) is never captured
+- No cross-agent view of your work
 
-## Versions
+## Supported Agents
 
-### v1 — Original (naive)
-- One new `{timestamp}-{session_id}.md` file per Stop event
-- Companion `session_summary.py` writes one line to `SESSION_LOG.md` (branch + last commit — never actually useful)
-- No deduplication, no index, no summaries, no parent links
-
-**Problems diagnosed:**
-- 315 files for ~50 unique sessions
-- `SESSION_LOG.md` always said "Next step: (fill in before closing)" — never filled in
-- Impossible to find sessions by topic without grep archaeology
-- Rewind/branch sessions had no link to their origin
-
-### v2 — Current
-- One `{session_id}.md` file per unique session — re-exports overwrite, no duplicates
-- Reads `away_summary` system events from the JSONL as the session summary (Claude's own description of what was happening)
-- Reads `forkedFrom` field to link rewind/branch sessions back to parent
-- Builds and maintains `SESSION_INDEX.md` — one searchable line per session with date, branch, summary, and link
-- Captures `aiTitle` as the document title
-
-## How It Works
-
-Claude Code fires the `Stop` hook every time a session ends. The hook:
-1. Reads `session_id` and `cwd` from the hook payload (stdin JSON)
-2. Finds the `.jsonl` transcript in `~/.claude/projects/`
-3. Parses all message types: `user`, `assistant`, `ai-title`, `system/away_summary`, `forkedFrom`
-4. Writes `{session_id}.md` to `{cwd}/docs/sessions/` (overwrites if exists)
-5. Appends/updates one row in `SESSION_INDEX.md`
+| Agent | Source Location | Hook Support | Token Tracking |
+|---|---|---|---|
+| Claude Code | `~/.claude/projects/<slug>/*.jsonl` | Stop hook (auto) | Yes |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | Manual (bulk) | Yes |
+| Cursor | `~/.cursor/projects/<slug>/agent-transcripts/` | hooks.json | No (not in JSONL) |
 
 ## Installation
 
 ```bash
-# 1. Copy the script
-mkdir -p ~/.claude/scripts
-cp v2/export-session.sh ~/.claude/scripts/export-session.sh
-chmod +x ~/.claude/scripts/export-session.sh
+pip install -e /path/to/agent-sessions
+# or from the repo directory:
+pip install -e .
 ```
 
-Add to `~/.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/scripts/export-session.sh",
-            "timeout": 15,
-            "statusMessage": "Exporting session transcript..."
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## Where Do My Exported Files Go?
-
-The script detects the output directory in this order:
-
-| Condition | Output location |
-|---|---|
-| `{cwd}/docs/sessions/` exists | `{cwd}/docs/sessions/{session_id}.md` |
-| `{cwd}/docs/` exists (no sessions subfolder) | Creates `{cwd}/docs/sessions/` and writes there |
-| No `docs/` folder found | Falls back to `~/.claude/sessions/{session_id}.md` |
-
-`SESSION_INDEX.md` is written to the same directory as the session files.
-
-**Note on committing session files:** The exported `*.md` files in `docs/sessions/` can get large. You may want to add `docs/sessions/` to your `.gitignore` or commit selectively.
-
-## SESSION_INDEX.md
-
-After export, `docs/sessions/SESSION_INDEX.md` looks like:
-
-```
-| ID         | Date       | Branch          | Summary                                              | File |
-|------------|------------|-----------------|------------------------------------------------------|------|
-| 021f1273…  | 2026-06-21 | deploy/test     | Translating item titles for company 66 to production | 021f1273….md |
-| 826db1cf…  | 2026-06-27 | feature/PRD-021 | PRD-021 agent permission system fully implemented    | 826db1cf….md |
-```
-
-Search: `grep "company 66" docs/sessions/SESSION_INDEX.md` — one result, instant.
-
-## Session File Format
-
-Each `{session_id}.md` contains:
-- Title (from `aiTitle`)
-- Session ID, branch, start time, export time
-- `Forked from: {parent_session_id}` if this session was a rewind/branch
-- **Session Summary** — the last `away_summary` from Claude (most complete state description), with earlier summaries collapsed in a `<details>` block
-- Full conversation transcript
-
-## Rewinds and Branches
-
-When you rewind mid-session or use `/branch`, Claude Code creates a new session ID. The new session's JSONL contains a `forkedFrom: {sessionId, messageUuid}` field on every message. v2 reads this and adds a `Forked from` line to the session file, so you can trace the lineage.
-
-## Bulk Migration
-
-To re-export all existing sessions for a project, run this from your terminal:
+### Install the Claude Code Stop hook (automatic export on every session end):
 
 ```bash
-# Replace <PROJECT_SLUG> with your actual ~/.claude/projects/ directory name
-# (run `ls ~/.claude/projects/` to find it — it's your project path with / replaced by -)
-PROJECT_SLUG="<PROJECT_SLUG>"
-PROJECT_CWD="/path/to/your/project"  # absolute path to your project root
-
-find ~/.claude/projects/$PROJECT_SLUG -name "*.jsonl" | while read f; do
-    sid=$(basename "$f" .jsonl)
-    payload="{\"session_id\": \"$sid\", \"cwd\": \"$PROJECT_CWD\"}"
-    echo "$payload" | bash ~/.claude/scripts/export-session.sh 2>/dev/null
-done
+agent-sessions install claude
 ```
 
-Example: if your project is at `/home/you/myapp`, the slug is likely `-home-you-myapp`.
+### Cursor hook (manual setup):
+
+```bash
+agent-sessions install cursor
+# Prints the hooks.json snippet to add to your project
+```
+
+### Codex (no hook support — use bulk export):
+
+```bash
+agent-sessions bulk --agent codex -o ~/my-sessions/
+```
+
+## Usage
+
+### Export a single session
+
+```bash
+agent-sessions export claude <session-id>
+agent-sessions export codex <session-id>
+agent-sessions export cursor <session-id>
+
+# Dry run — see what would be exported without writing
+agent-sessions export claude <session-id> --dry-run
+```
+
+### Bulk export all sessions
+
+```bash
+# All agents
+agent-sessions bulk -o ~/my-sessions/
+
+# One agent
+agent-sessions bulk --agent claude -o ~/my-sessions/
+
+# One project
+agent-sessions bulk --agent claude --project home-ali-myproject -o ~/my-sessions/
+```
+
+### Search across sessions
+
+```bash
+agent-sessions search "authentication"
+agent-sessions search "company 66" -d ~/my-sessions/
+```
+
+### View aggregate stats
+
+```bash
+agent-sessions stats -d ~/my-sessions/
+```
+
+Output:
+```
+Total sessions: 142
+Total messages: 3,847
+Total tokens:   12,453,200
+Total duration: 47.2h
+
+  claude: 98 sessions, 8,200,000 tokens, 32.1h
+  codex:  31 sessions, 3,100,000 tokens, 11.4h
+  cursor: 13 sessions, 0 tokens, 3.7h
+```
+
+## Output Format
+
+### Session files (`<session-id>.md`)
+
+Each file contains:
+- Title, agent, session ID, branch, model
+- Forked-from link (if rewind/branch)
+- Duration and token usage
+- Session summary (from `away_summary` for Claude)
+- Full conversation transcript
+
+### SESSION_INDEX.md
+
+One searchable line per session:
+
+```
+| ID | Agent | Date | Branch | Duration | Messages | Summary | File |
+|---|---|---|---|---|---|---|---|
+| 021f1273… | claude | 2026-06-21 | deploy/test | 1h 23m | 12u/45a | Translating item titles... | 021f1273….md |
+```
+
+### sessions.json
+
+Machine-readable index with full metadata, token counts, and durations. Enables programmatic queries like "show me all sessions on branch X between date A and B".
+
+## Architecture
+
+```
+Raw JSONL (agent-specific)
+    ↓
+Parser (one per agent)         ← claude.py, codex.py, cursor.py
+    ↓
+Canonical Session dataclass    ← models.py
+    ↓
+Renderers (shared)             ← markdown.py, index.py, json_index.py
+```
+
+Adding a new agent = write one parser that returns a `Session`. All renderers work automatically.
+
+## History
+
+### v1 — Original (Claude-only, naive)
+- `{timestamp}-{session_id}.md` per Stop event — caused hundreds of duplicates
+- Git-log-based summary — never useful
+
+### v2 — Claude-only, smart
+- Deduplication via `{session_id}.md` naming
+- `away_summary` as real session summary
+- `forkedFrom` tracking
+- `SESSION_INDEX.md`
+
+### v3 — Universal (current)
+- Multi-agent: Claude Code, Codex, Cursor
+- Parser/renderer architecture — new agents are one file
+- Token usage and duration tracking
+- `sessions.json` machine-readable index
+- pip-installable CLI with `export`, `bulk`, `search`, `stats`, `install`
+- `--dry-run` flag
