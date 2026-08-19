@@ -1,11 +1,15 @@
 """CLI entry point for agent-sessions.
 
 Commands:
-  export     Export a single session by ID (also used as hook target)
-  bulk       Export all sessions for an agent
-  search     Search across all exported sessions
-  install    Install the Stop hook for an agent
-  stats      Show aggregate stats across all sessions
+  export       Export a single session by ID (also used as hook target)
+  bulk         Export all sessions for an agent
+  search       Search across all exported sessions
+  stats        Show aggregate stats across all sessions
+  distill      Extract structured knowledge from sessions
+  link         Find related sessions / build session graph
+  to-obsidian  Export distilled sessions as Obsidian notes
+  report       Generate weekly/aggregate report
+  install      Install the Stop hook for an agent
 """
 
 from __future__ import annotations
@@ -17,6 +21,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from agent_sessions.analysis.distiller import Distiller, DistilledSession
+from agent_sessions.analysis.linker import build_graph, load_distilled_sessions, query_graph
+from agent_sessions.analysis.obsidian import ObsidianExporter
+from agent_sessions.analysis.report import WeeklyReport, week_start
 from agent_sessions.models import Agent, Session
 from agent_sessions.parsers import PARSERS
 from agent_sessions.renderers.index import IndexRenderer
@@ -224,6 +232,180 @@ def cmd_stats(args: argparse.Namespace) -> None:
         print(f"  {agent}: {len(agent_sessions)} sessions, {agent_tokens:,} tokens, {agent_dur/3600:.1f}h")
 
 
+def load_sessions_index(directory: Path) -> dict[str, dict]:
+    json_idx = directory / "sessions.json"
+    if not json_idx.exists():
+        return {}
+    try:
+        data = json.loads(json_idx.read_text(encoding="utf-8"))
+        sessions = data.get("sessions", []) if isinstance(data, dict) else data
+        return {s["id"]: s for s in sessions if "id" in s}
+    except (json.JSONDecodeError, KeyError):
+        return {}
+
+
+def distilled_dir_for(directory: Path) -> Path:
+    d = directory / "distilled"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def cmd_distill(args: argparse.Namespace) -> None:
+    directory = Path(args.directory) if args.directory else resolve_output_dir(None)
+    out_dir = distilled_dir_for(directory)
+    index = load_sessions_index(directory)
+    count = 0
+
+    if args.session_id:
+        targets = [args.session_id]
+    else:
+        targets = [p.stem for p in directory.glob("*.md") if p.name != "SESSION_INDEX.md"]
+
+    for sid in targets:
+        meta = index.get(sid, {})
+        md_path = directory / f"{sid}.md"
+
+        distilled: Optional[DistilledSession] = None
+
+        # Try re-parsing from source for richer tool data
+        agent = meta.get("agent")
+        if agent and agent in PARSERS:
+            src = PARSERS[agent].find_session_file(sid)
+            if src:
+                session = PARSERS[agent].parse(src)
+                if session:
+                    distilled = Distiller.distill(session)
+
+        if distilled is None and md_path.exists():
+            distilled = Distiller.distill_from_markdown(md_path, meta)
+
+        if distilled is None:
+            continue
+
+        if args.significant_only and not Distiller.is_significant(distilled, args.min_duration):
+            continue
+
+        if args.dry_run:
+            print(f"[dry-run] {sid} score={distilled.significance} topic={distilled.topic[:60]}")
+            count += 1
+            continue
+
+        path = distilled.save(out_dir)
+        print(f"Distilled → {path}")
+        count += 1
+
+    print(f"\nDistilled {count} session(s) to {out_dir}")
+
+
+def cmd_link(args: argparse.Namespace) -> None:
+    directory = Path(args.directory) if args.directory else resolve_output_dir(None)
+    d_dir = distilled_dir_for(directory)
+
+    if args.build or not any([args.prd, args.branch, args.file, args.session_id]):
+        distilled = load_distilled_sessions(d_dir)
+        if not distilled:
+            print("No distilled sessions. Run 'distill --all' first.", file=sys.stderr)
+            sys.exit(1)
+        graph = build_graph(distilled)
+        graph_path = directory / "sessions_graph.json"
+        graph.save(graph_path)
+        print(f"Graph built → {graph_path}")
+        print(f"  {len(graph.nodes)} nodes, {len(graph.edges)} edges")
+        if not any([args.prd, args.branch, args.file, args.session_id]):
+            return
+
+    distilled = load_distilled_sessions(d_dir)
+    graph_path = directory / "sessions_graph.json"
+    graph = build_graph(distilled)
+    if graph_path.exists():
+        try:
+            from agent_sessions.analysis.linker import SessionGraph
+            graph = SessionGraph.load(graph_path)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+
+    results = query_graph(
+        graph, distilled,
+        prd=args.prd,
+        branch=args.branch,
+        file_path=args.file,
+        session_id=args.session_id,
+    )
+
+    if not results:
+        print("No linked sessions found.")
+        return
+
+    for d in sorted(results, key=lambda x: x.get("date", ""), reverse=True):
+        prds = ", ".join(d.get("prds", [])[:2]) or "-"
+        print(f"  [{d.get('agent')}] {d.get('date')} score={d.get('significance')}  {d.get('topic', '')[:60]}")
+        print(f"           PRDs: {prds}  branch: {d.get('branch', '?')}")
+    print(f"\n{len(results)} session(s) linked.")
+
+
+def cmd_to_obsidian(args: argparse.Namespace) -> None:
+    directory = Path(args.directory) if args.directory else resolve_output_dir(None)
+    d_dir = distilled_dir_for(directory)
+    vault = Path(args.vault).expanduser()
+
+    if not vault.is_dir():
+        print(f"Vault not found: {vault}", file=sys.stderr)
+        sys.exit(1)
+
+    since = args.since or ""
+    count = 0
+
+    for path in sorted(d_dir.glob("*.distilled.json")):
+        try:
+            distilled = DistilledSession.load(path)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            continue
+
+        if since and (distilled.date or "") < since:
+            continue
+
+        if args.significant_only and distilled.significance < args.min_significance:
+            continue
+
+        session_md = directory / f"{distilled.session_id}.md"
+        md_ref = str(session_md) if session_md.exists() else None
+
+        if args.dry_run:
+            note = ObsidianExporter.note_path(vault, distilled, args.folder)
+            print(f"[dry-run] Would write → {note}")
+            count += 1
+            continue
+
+        out = ObsidianExporter.write(vault, distilled, args.folder, md_ref)
+        print(f"Obsidian → {out}")
+        count += 1
+
+    print(f"\nExported {count} note(s) to {vault / (args.folder or ObsidianExporter.DEFAULT_FOLDER)}")
+
+
+def cmd_report(args: argparse.Namespace) -> None:
+    directory = Path(args.directory) if args.directory else resolve_output_dir(None)
+
+    since = args.since
+    if args.week:
+        since = week_start(7)
+        label = f"Week of {since}"
+    elif since:
+        label = f"Since {since}"
+    else:
+        label = "All time"
+
+    report = WeeklyReport.from_directory(directory, since=since)
+    text = report.render(label)
+
+    if args.output:
+        out = Path(args.output)
+        report.save(out, label)
+        print(f"Report → {out}")
+    else:
+        print(text)
+
+
 # ── Install command ─────────────────────────────────────────────────────────
 
 CLAUDE_HOOK_SCRIPT = """\
@@ -331,6 +513,40 @@ def main() -> None:
     p_stats = sub.add_parser("stats", help="Show aggregate session stats")
     p_stats.add_argument("-d", "--directory", help="Directory with sessions.json")
 
+    # distill
+    p_distill = sub.add_parser("distill", help="Extract structured knowledge from sessions")
+    p_distill.add_argument("session_id", nargs="?", help="Single session ID (omit for --all)")
+    p_distill.add_argument("-d", "--directory", help="Exported sessions directory")
+    p_distill.add_argument("--significant-only", action="store_true", help="Skip low-value sessions")
+    p_distill.add_argument("--min-duration", type=int, default=30, help="Min minutes for significant filter")
+    p_distill.add_argument("--dry-run", action="store_true")
+
+    # link
+    p_link = sub.add_parser("link", help="Find related sessions / build graph")
+    p_link.add_argument("-d", "--directory", help="Exported sessions directory")
+    p_link.add_argument("--build", action="store_true", help="Build/rebuild sessions_graph.json")
+    p_link.add_argument("--prd", help="Find sessions for a PRD (e.g. PRD-021)")
+    p_link.add_argument("--branch", help="Find sessions on a branch")
+    p_link.add_argument("--file", help="Find sessions that touched a file")
+    p_link.add_argument("--session-id", help="Find sessions linked to this session")
+
+    # to-obsidian
+    p_obs = sub.add_parser("to-obsidian", help="Export distilled sessions as Obsidian notes")
+    p_obs.add_argument("--vault", required=True, help="Obsidian vault path")
+    p_obs.add_argument("-d", "--directory", help="Exported sessions directory")
+    p_obs.add_argument("--folder", default="", help="Subfolder in vault (default: Agent Sessions)")
+    p_obs.add_argument("--since", help="Only sessions on/after this date (YYYY-MM-DD)")
+    p_obs.add_argument("--significant-only", action="store_true")
+    p_obs.add_argument("--min-significance", type=int, default=3)
+    p_obs.add_argument("--dry-run", action="store_true")
+
+    # report
+    p_report = sub.add_parser("report", help="Generate session report")
+    p_report.add_argument("-d", "--directory", help="Exported sessions directory")
+    p_report.add_argument("--week", action="store_true", help="Last 7 days only")
+    p_report.add_argument("--since", help="Sessions on/after date (YYYY-MM-DD)")
+    p_report.add_argument("-o", "--output", help="Write report to file")
+
     # install
     p_install = sub.add_parser("install", help="Install the Stop hook for an agent")
     p_install.add_argument("agent", choices=["claude", "codex", "cursor"])
@@ -347,6 +563,14 @@ def main() -> None:
         cmd_search(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "distill":
+        cmd_distill(args)
+    elif args.command == "link":
+        cmd_link(args)
+    elif args.command == "to-obsidian":
+        cmd_to_obsidian(args)
+    elif args.command == "report":
+        cmd_report(args)
     elif args.command == "install":
         cmd_install(args)
     else:

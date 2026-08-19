@@ -22,6 +22,11 @@ agent_sessions/
     markdown.py       — Session → {session_id}.md
     index.py          — Session → SESSION_INDEX.md (one line per session)
     json_index.py     — Session → sessions.json (machine-readable)
+  analysis/
+    distiller.py      — Session → .distilled.json
+    linker.py         — cross-session graph
+    obsidian.py       — distilled → Obsidian notes
+    report.py         — weekly reports
 v1/                   — original naive implementation (preserved for history)
 v2/                   — claude-only smart implementation (preserved for history)
 ```

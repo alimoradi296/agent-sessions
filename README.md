@@ -137,6 +137,74 @@ Renderers (shared)             ← markdown.py, index.py, json_index.py
 
 Adding a new agent = write one parser that returns a `Session`. All renderers work automatically.
 
+## Knowledge Extraction (v0.2)
+
+Turn transcripts into structured knowledge:
+
+```
+Raw transcript (.md)
+    ↓
+distill  →  {session_id}.distilled.json  (PRDs, files, decisions, bugs, deferred)
+    ↓
+link     →  sessions_graph.json           (cross-session relationships)
+    ↓
+to-obsidian → Obsidian notes with frontmatter
+report   →  weekly markdown report
+```
+
+### Distill sessions
+
+```bash
+# All exported sessions
+agent-sessions distill -d ~/.agent-sessions/exports/
+
+# Only significant sessions (PRD work, 30m+, 5+ files, decisions)
+agent-sessions distill -d ~/.agent-sessions/exports/ --significant-only
+
+# One session
+agent-sessions distill <session-id> -d ~/.agent-sessions/exports/
+```
+
+Each `.distilled.json` contains:
+- PRDs worked on, files touched, tools/commands used
+- Inferred outcome (implemented, fixed, reviewed, planned, etc.)
+- Extracted decisions, bugs, deferred work, open questions
+- Significance score (0–10) for filtering
+
+### Link related sessions
+
+```bash
+# Build relationship graph
+agent-sessions link --build -d ~/.agent-sessions/exports/
+
+# Query by PRD, branch, file, or session
+agent-sessions link --prd PRD-021 -d ~/.agent-sessions/exports/
+agent-sessions link --branch deploy/new_test -d ~/.agent-sessions/exports/
+agent-sessions link --file apps/users/permissions.py -d ~/.agent-sessions/exports/
+agent-sessions link --session-id 826db1cf-... -d ~/.agent-sessions/exports/
+```
+
+Graph edge types: `same_prd`, `same_branch`, `same_file`, `forked_from`
+
+### Export to Obsidian
+
+```bash
+agent-sessions to-obsidian \
+  --vault ~/empty/growing_in_my_mind \
+  --since 2026-07-01 \
+  --significant-only \
+  -d ~/.agent-sessions/exports/
+```
+
+Creates notes in `Agent Sessions/` with YAML frontmatter, PRD links, decisions, and deferred work.
+
+### Weekly report
+
+```bash
+agent-sessions report --week -d ~/.agent-sessions/exports/
+agent-sessions report --since 2026-07-01 -o ~/report.md
+```
+
 ## History
 
 ### v1 — Original (Claude-only, naive)
@@ -149,10 +217,16 @@ Adding a new agent = write one parser that returns a `Session`. All renderers wo
 - `forkedFrom` tracking
 - `SESSION_INDEX.md`
 
-### v3 — Universal (current)
+### v3 — Universal
 - Multi-agent: Claude Code, Codex, Cursor
 - Parser/renderer architecture — new agents are one file
 - Token usage and duration tracking
 - `sessions.json` machine-readable index
 - pip-installable CLI with `export`, `bulk`, `search`, `stats`, `install`
 - `--dry-run` flag
+
+### v0.2 — Knowledge extraction (current)
+- `distill` — structured JSON per session (PRDs, files, decisions, bugs, deferred)
+- `link` — cross-session graph (same PRD, branch, file, fork lineage)
+- `to-obsidian` — Zettelkasten-friendly notes with frontmatter
+- `report` — weekly aggregate report with extracted knowledge
