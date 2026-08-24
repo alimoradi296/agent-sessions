@@ -65,7 +65,7 @@ def export_session(session: Session, out_dir: Path, dry_run: bool = False) -> No
 
 
 # ── Hook entry point ────────────────────────────────────────────────────────
-# Called by Claude Code Stop hook: reads JSON from stdin
+# Called by agent Stop hooks: reads JSON from stdin
 
 def cmd_hook(args: argparse.Namespace) -> None:
     try:
@@ -414,6 +414,29 @@ set -euo pipefail
 cat | python3 -m agent_sessions hook
 """
 
+CODEX_HOOK_SCRIPT = """\
+#!/usr/bin/env bash
+set -euo pipefail
+
+INPUT=$(cat)
+
+# A Stop hook must write exactly one JSON object to stdout. Keep the export
+# asynchronous and silence all of its output so it cannot corrupt that reply.
+(
+  SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('session_id', ''))
+" 2>/dev/null || true)
+
+  if [[ -n "$SESSION_ID" ]]; then
+    agent-sessions export codex "$SESSION_ID" -o ~/.agent-sessions/exports/ >/dev/null 2>&1 || true
+  fi
+) >/dev/null 2>&1 &
+
+printf '{}\\n'
+"""
+
 def cmd_install(args: argparse.Namespace) -> None:
     agent = args.agent
 
@@ -467,8 +490,37 @@ def cmd_install(args: argparse.Namespace) -> None:
         }, indent=2))
 
     elif agent == "codex":
-        print("Codex does not currently support Stop hooks.")
-        print("Use 'agent-sessions bulk --agent codex' to export all sessions manually.")
+        scripts_dir = Path.home() / ".codex" / "hooks"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        hook_path = scripts_dir / "export-session.sh"
+        hook_path.write_text(CODEX_HOOK_SCRIPT)
+        hook_path.chmod(0o755)
+
+        settings_path = Path.home() / ".codex" / "hooks.json"
+        hook_entry = {
+            "type": "command",
+            "command": f"bash {hook_path}",
+            "timeout": 15,
+        }
+
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+        else:
+            settings = {}
+
+        hooks = settings.setdefault("hooks", {})
+        stop_hooks = hooks.setdefault("Stop", [])
+        already = any(
+            h.get("command", "").endswith("export-session.sh")
+            for group in stop_hooks
+            for h in group.get("hooks", [])
+        )
+        if not already:
+            stop_hooks.append({"hooks": [hook_entry]})
+            settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+            print(f"Settings updated: {settings_path}")
+
+        print(f"Hook installed: {hook_path}")
 
     else:
         print(f"Unknown agent: {agent}", file=sys.stderr)

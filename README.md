@@ -17,7 +17,7 @@ Every AI coding agent stores session transcripts in its own format, in its own l
 | Agent | Source Location | Hook Support | Token Tracking |
 |---|---|---|---|
 | Claude Code | `~/.claude/projects/<slug>/*.jsonl` | Stop hook (auto) | Yes |
-| Codex | `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | Manual (bulk) | Yes |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | Stop hook (auto) | Yes |
 | Cursor | `~/.cursor/projects/<slug>/agent-transcripts/` | hooks.json | No (not in JSONL) |
 
 ## Installation
@@ -41,10 +41,10 @@ agent-sessions install cursor
 # Prints the hooks.json snippet to add to your project
 ```
 
-### Codex (no hook support — use bulk export):
+### Install the Codex Stop hook (automatic export on every session end):
 
 ```bash
-agent-sessions bulk --agent codex -o ~/my-sessions/
+agent-sessions install codex
 ```
 
 ## Usage
