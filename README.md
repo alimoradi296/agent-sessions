@@ -1,16 +1,45 @@
 # agent-sessions
 
-Universal AI agent session exporter. Turns raw JSONL transcripts from Claude Code, Codex, and Cursor into searchable, deduplicated Markdown files with a live index.
+Searchable local exports of Claude Code, Codex, and Cursor transcripts.
 
-## The Problem
+The CLI writes one Markdown file per session ID, a readable index, and a JSON index.
+Repeated exports update the same session file. Optional commands extract decisions and connect related sessions.
 
-Every AI coding agent stores session transcripts in its own format, in its own location. None of them give you a human-readable, searchable archive. Without this tool:
+**Status:** Source-installable `0.2.0` CLI. Transcript formats and hook support depend on the installed agent version.
 
-- Sessions pile up as opaque JSONL files across `~/.claude/`, `~/.codex/`, `~/.cursor/`
-- No way to find "what session covered topic X" without grep archaeology
-- No duration, token usage, or cost tracking per session
-- Rewinds/branches have no link back to their parent session
-- No cross-agent view of your work
+[Try a sample export](#try-a-sample-export) · [Export your sessions](#export-your-sessions) · [Limits and privacy](#limits-and-privacy)
+
+## Try a sample export
+
+Requirements: Python 3.10 or later.
+
+```bash
+git clone https://github.com/alimoradi296/agent-sessions.git
+cd agent-sessions
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+python examples/demo.py
+```
+
+The demo uses a synthetic transcript in this repository. It does not read your agent history or install hooks.
+It creates these files in `demo-output/`:
+
+```text
+demo-output/
+├── sample-session.md
+├── SESSION_INDEX.md
+└── sessions.json
+```
+
+Search the exported title and summary:
+
+```bash
+agent-sessions search "retry" -d demo-output
+agent-sessions stats -d demo-output
+```
+
+Open `demo-output/sample-session.md` to inspect the conversation and session metadata.
 
 ## Supported Agents
 
@@ -20,13 +49,19 @@ Every AI coding agent stores session transcripts in its own format, in its own l
 | Codex | `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | Stop hook (auto) | Yes |
 | Cursor | `~/.cursor/projects/<slug>/agent-transcripts/` | hooks.json | No (not in JSONL) |
 
-## Installation
+## Export your sessions
+
+Use the source installation in the sample procedure above.
+The CLI reads the agent directories in the table. Export one session first:
 
 ```bash
-pip install -e /path/to/agent-sessions
-# or from the repo directory:
-pip install -e .
+agent-sessions export claude <session-id> --dry-run
+agent-sessions export claude <session-id> -o ./exports
 ```
+
+Replace `<session-id>` with an existing session ID.
+The dry run prints the proposed destination and metadata without exporting files.
+Review the output before a bulk export or hook installation.
 
 ### Install the Claude Code Stop hook (automatic export on every session end):
 
@@ -41,7 +76,7 @@ agent-sessions install cursor
 # Prints the hooks.json snippet to add to your project
 ```
 
-### Install the Codex Stop hook (automatic export on every session end):
+### Install the Codex Stop hook (requires a version with Stop hook support):
 
 ```bash
 agent-sessions install codex
@@ -77,7 +112,7 @@ agent-sessions bulk --agent claude --project home-ali-myproject -o ~/my-sessions
 
 ```bash
 agent-sessions search "authentication"
-agent-sessions search "company 66" -d ~/my-sessions/
+agent-sessions search "retry" -d ~/my-sessions/
 ```
 
 ### View aggregate stats
@@ -86,7 +121,7 @@ agent-sessions search "company 66" -d ~/my-sessions/
 agent-sessions stats -d ~/my-sessions/
 ```
 
-Output:
+Illustrative output, not a benchmark or usage report:
 ```
 Total sessions: 142
 Total messages: 3,847
@@ -178,9 +213,9 @@ Each `.distilled.json` contains:
 agent-sessions link --build -d ~/.agent-sessions/exports/
 
 # Query by PRD, branch, file, or session
-agent-sessions link --prd PRD-021 -d ~/.agent-sessions/exports/
-agent-sessions link --branch deploy/new_test -d ~/.agent-sessions/exports/
-agent-sessions link --file apps/users/permissions.py -d ~/.agent-sessions/exports/
+agent-sessions link --prd DEMO-001 -d ~/.agent-sessions/exports/
+agent-sessions link --branch main -d ~/.agent-sessions/exports/
+agent-sessions link --file example.py -d ~/.agent-sessions/exports/
 agent-sessions link --session-id 826db1cf-... -d ~/.agent-sessions/exports/
 ```
 
@@ -190,7 +225,7 @@ Graph edge types: `same_prd`, `same_branch`, `same_file`, `forked_from`
 
 ```bash
 agent-sessions to-obsidian \
-  --vault ~/empty/growing_in_my_mind \
+  --vault /path/to/your/vault \
   --since 2026-07-01 \
   --significant-only \
   -d ~/.agent-sessions/exports/
@@ -204,6 +239,18 @@ Creates notes in `Agent Sessions/` with YAML frontmatter, PRD links, decisions, 
 agent-sessions report --week -d ~/.agent-sessions/exports/
 agent-sessions report --since 2026-07-01 -o ~/report.md
 ```
+
+## Limits and privacy
+
+- Agent transcript formats can change. The parsers recognize the formats implemented in this checkout.
+- Cursor exports lack token usage and branch metadata in the parsed format. Missing token counts do not mean zero usage.
+- Session titles and extracted outcomes are metadata or heuristics. They do not prove completion or deployment.
+- Hook installation changes local agent settings. Verify hook support in your installed agent version before installation.
+- Exported transcripts can contain prompts, file paths, tool results, and sensitive project information.
+- The parser and export commands operate locally. Review generated files before sharing or committing them.
+
+The sample procedure verifies export, indexing, and search with synthetic data.
+It does not certify every agent version or hook lifecycle.
 
 ## History
 

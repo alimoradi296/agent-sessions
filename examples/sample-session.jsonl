@@ -1,0 +1,4 @@
+{"type": "ai-title", "aiTitle": "Add a retry limit to the example job"}
+{"type": "user", "timestamp": "2026-01-01T10:00:00Z", "gitBranch": "main", "cwd": "/example/project", "message": {"role": "user", "content": "Add a retry limit to the example job."}}
+{"type": "assistant", "timestamp": "2026-01-01T10:01:00Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "The example job retries at most three times. This synthetic transcript demonstrates export and search."}]}}
+{"type": "system", "subtype": "away_summary", "content": "Added a retry limit to an example job. Synthetic demonstration data."}
