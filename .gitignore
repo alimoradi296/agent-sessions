@@ -21,3 +21,5 @@ coverage.json
 *.distilled.json
 sessions_graph.json
 agent-sessions-report*.md
+doctor-report*.json
+doctor-report*.txt

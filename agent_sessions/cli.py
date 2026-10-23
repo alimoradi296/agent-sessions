@@ -9,6 +9,8 @@ Commands:
   link         Find related sessions / build session graph
   to-obsidian  Export distilled sessions as Obsidian notes
   report       Generate weekly/aggregate report
+  context      Build a local pack of cited transcript excerpts
+  doctor       Inspect sources, exports, indexes, and hooks without changes
   install      Install the Stop hook for an agent
 """
 
@@ -24,6 +26,7 @@ from typing import Optional
 
 from agent_sessions.analysis.distiller import Distiller, DistilledSession
 from agent_sessions.analysis.context import build_context
+from agent_sessions.analysis.doctor import Doctor, render_doctor
 from agent_sessions.analysis.linker import build_graph, load_distilled_sessions, query_graph
 from agent_sessions.analysis.obsidian import ObsidianExporter
 from agent_sessions.analysis.report import WeeklyReport, week_start
@@ -462,6 +465,17 @@ def cmd_context(args: argparse.Namespace) -> None:
         print(text, end="")
 
 
+def cmd_doctor(args: argparse.Namespace) -> None:
+    # Do not call resolve_output_dir: diagnostics must not create a directory.
+    directory = Path(args.directory).expanduser() if args.directory else Path.home() / ".agent-sessions" / "exports"
+    agents = [args.agent] if args.agent else None
+    project = Path(args.project_dir).expanduser() if args.project_dir else None
+    report = Doctor(directory, agents=agents, project_dir=project).run()
+    print(json.dumps(report, indent=2) if args.json else render_doctor(report))
+    if report["exit_code"]:
+        sys.exit(report["exit_code"])
+
+
 # ── Install command ─────────────────────────────────────────────────────────
 
 CLAUDE_HOOK_SCRIPT = """\
@@ -674,6 +688,12 @@ def main() -> None:
     p_context.add_argument("--last", type=int, default=5, help="Maximum matching sessions (default: 5)")
     p_context.add_argument("-o", "--output", help="Write the pack to a local file")
 
+    p_doctor = sub.add_parser("doctor", help="Inspect sources, exports, indexes, and hooks without changes")
+    p_doctor.add_argument("-d", "--directory", help="Export directory (default: ~/.agent-sessions/exports)")
+    p_doctor.add_argument("--agent", choices=list(PARSERS), help="Inspect source and hook configuration for this agent")
+    p_doctor.add_argument("--project-dir", help="Also inspect this project's .cursor/hooks.json")
+    p_doctor.add_argument("--json", action="store_true", help="Print a JSON diagnostic report")
+
     # install
     p_install = sub.add_parser("install", help="Install the Stop hook for an agent")
     p_install.add_argument("agent", choices=["claude", "codex", "cursor"])
@@ -702,6 +722,8 @@ def main() -> None:
         cmd_report(args)
     elif args.command == "context":
         cmd_context(args)
+    elif args.command == "doctor":
+        cmd_doctor(args)
     elif args.command == "install":
         cmd_install(args)
     else:

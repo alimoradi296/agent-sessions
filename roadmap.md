@@ -22,6 +22,7 @@ Private transcripts, exports, reports, and context packs stay outside the reposi
 | Rule-based distillation | Implemented, heuristic results |
 | Session links, reports, and Obsidian export | Implemented |
 | Hook installers | Implemented, runtime compatibility needs separate checks |
+| Read-only archive diagnostics | Implemented with `doctor`, hook execution remains unverified |
 
 An implemented feature is not a guarantee of compatibility with every agent version.
 
@@ -42,10 +43,12 @@ An implemented feature is not a guarantee of compatibility with every agent vers
 - [x] Add date limits to bulk export.
 - [x] Add synthetic regression tests.
 - [x] Ignore common private transcript and export artifacts in Git.
+- [x] Add read-only `doctor` checks for source discovery, hook configuration, stale exports, and index consistency.
+- [x] Add text and JSON diagnostic reports with exit codes for warnings and errors.
+- [x] Check synthetic fixtures for read-only behavior and hook non-execution.
 
 ### Remaining
 
-- [ ] Add `doctor` checks for source discovery, hook configuration, stale exports, and index consistency.
 - [ ] Add a scheduled reconciliation command or documented cron/systemd setup.
 - [ ] Check hook behavior against supported agent releases.
 - [ ] Define support for child-agent transcripts and their parent relationships.
@@ -159,7 +162,7 @@ agent-sessions context "example cache" --last 5 \
 ## Execution order
 
 1. Complete ingestion checks and generate a private coverage manifest.
-2. Add `doctor`, atomic writes, and scheduled reconciliation.
+2. Use `doctor` to inspect private exports. Add atomic writes and scheduled reconciliation.
 3. Evaluate the Context Bridge prototype with a real local handoff.
 4. Improve extraction and evidence references.
 5. Add workflow links, semantic search, analytics, and Obsidian synchronization as needed.

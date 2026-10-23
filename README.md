@@ -130,6 +130,38 @@ Coverage applies to discovered main transcripts. Child-agent transcript discover
 Date limits use the session start date, or the estimated date for undated Cursor transcripts.
 They do not select individual turns from older sessions resumed within the period.
 
+### Check archive health
+
+```bash
+agent-sessions doctor -d /path/to/private-exports/
+agent-sessions doctor --agent codex -d /path/to/private-exports/
+agent-sessions doctor --json -d /path/to/private-exports/ > /tmp/doctor-report.json
+```
+
+`doctor` reads sources, transcripts, indexes, and hook configuration. It does not repair files, create export directories, or run hooks.
+Without `-d`, it inspects `~/.agent-sessions/exports/` without creating that directory.
+
+The checks cover:
+
+- Missing exports and source files newer than their Markdown exports.
+- Differences between current parser counts and exported message counts.
+- Missing transcripts, duplicate JSON entries, and inconsistent transcript metadata.
+- Missing, duplicate, or orphan entries in the Markdown index.
+- Invalid hook configuration and missing shell scripts referenced by hook commands.
+
+Each missing export refers to the selected export directory. An export can exist in another directory.
+The source scan uses the current parsers and can take time for a large archive.
+Modification times detect likely stale exports. They do not establish content integrity.
+
+Exit code `0` means that inspection found no warnings or errors. Exit code `1` means that it found at least one.
+An absent agent directory is informational unless `--agent` explicitly selects that agent.
+An absent hook configuration is informational because manual export remains available.
+
+Hook inspection covers global Claude settings, global Codex hooks, and global Cursor hooks.
+Use `--project-dir /path/to/project` to also inspect that project's `.cursor/hooks.json`.
+An exporter reference proves only that configuration text mentions the exporter. Hook execution remains unverified.
+Reports contain local paths and session IDs. Keep these reports outside public repositories.
+
 ### Search across sessions
 
 ```bash
