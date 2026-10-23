@@ -7,6 +7,12 @@ Repeated exports update the same session file. Optional commands extract decisio
 
 **Status:** Source-installable `0.2.0` CLI. Transcript formats and hook support depend on the installed agent version.
 
+Exports and analysis run locally with the Python standard library. These commands do not upload transcript data.
+Generated files can contain private conversations, source paths, code, and tool outputs.
+Keep output directories outside public repositories. Git ignore rules are an additional guard, not a redaction system.
+
+See [roadmap.md](roadmap.md) for the current implementation status and planned work.
+
 [Try a sample export](#try-a-sample-export) · [Export your sessions](#export-your-sessions) · [Limits and privacy](#limits-and-privacy)
 
 ## Try a sample export
@@ -105,8 +111,24 @@ agent-sessions bulk -o ~/my-sessions/
 agent-sessions bulk --agent claude -o ~/my-sessions/
 
 # One project
-agent-sessions bulk --agent claude --project home-ali-myproject -o ~/my-sessions/
+agent-sessions bulk --agent claude --project example-project -o ~/my-sessions/
+
+# Limit session dates and record a status for each discovered source file
+# --until is exclusive. Cursor dates use file modification time.
+agent-sessions bulk --since 2026-02-01 --until 2026-03-01 \
+  --coverage -o /path/to/private-exports/
 ```
+
+Codex exports merge files with the same metadata session ID before writing a transcript.
+Identical records across files count once. Repeated records within a file remain intact.
+The same merge applies to single-session export, hooks, and source-based distillation.
+
+The optional `coverage.json` records each source file as `exported`, `empty`, `outside_period`, or `error`.
+Read failures produce an `error` entry and a nonzero exit status.
+Multiple exported source files can contribute to one session.
+Coverage applies to discovered main transcripts. Child-agent transcript discovery is planned.
+Date limits use the session start date, or the estimated date for undated Cursor transcripts.
+They do not select individual turns from older sessions resumed within the period.
 
 ### Search across sessions
 
@@ -143,6 +165,14 @@ Each file contains:
 - Duration and token usage
 - Session summary (from `away_summary` for Claude)
 - Full conversation transcript
+
+Codex exports include tool arguments, results, call IDs, branch metadata, and the model from turn context.
+The model provider has a separate field. Tool output does not count as an assistant response.
+
+Cursor exports preserve the project directory name as `project_slug`.
+They leave the working directory unknown because the slug does not reliably encode the original path.
+Cursor dates use `date_source: file_mtime`. These estimates do not establish a start time, end time, or duration.
+JSON indexes, Markdown indexes, reports, and Obsidian notes preserve the date provenance.
 
 ### SESSION_INDEX.md
 
@@ -205,6 +235,24 @@ Each `.distilled.json` contains:
 - Inferred outcome (implemented, fixed, reviewed, planned, etc.)
 - Extracted decisions, bugs, deferred work, open questions
 - Significance score (0–10) for filtering
+
+Decisions are heuristic candidates. Outcomes remain unverified claims.
+Tool payloads, code blocks, quoted text, and common instruction blocks do not feed decision extraction.
+File paths and PRD mentions do not prove that the session changed those files or delivered those requirements.
+
+### Context Bridge prototype
+
+```bash
+agent-sessions context "example cache" --last 5 \
+  -d /path/to/private-exports/ \
+  -o /path/to/private-context.md
+```
+
+This command searches conversation text with a literal query across agents.
+The pack includes each matching session's latest request and response, date provenance, and a link to the local export.
+The excerpts exclude tool payloads and marked commentary. The pack labels historical claims as unverified.
+It does not call an LLM or change agent configuration.
+The latest response can omit relevant earlier decisions. Read the linked transcript before acting.
 
 ### Link related sessions
 
@@ -277,3 +325,14 @@ It does not certify every agent version or hook lifecycle.
 - `link` — cross-session graph (same PRD, branch, file, fork lineage)
 - `to-obsidian` — Zettelkasten-friendly notes with frontmatter
 - `report` — weekly aggregate report with extracted knowledge
+
+## Development
+
+Run the synthetic regression tests:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Tests generate invented transcripts in temporary directories.
+Do not add real transcripts, exports, reports, or screenshots to tests or public demonstrations.

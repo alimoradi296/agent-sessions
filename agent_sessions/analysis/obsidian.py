@@ -38,10 +38,12 @@ class ObsidianExporter:
             "session_id": distilled.session_id,
             "agent": distilled.agent,
             "date": distilled.date,
+            "date_source": distilled.date_source,
             "branch": distilled.branch,
             "project": distilled.project,
             "topic": distilled.topic,
             "outcome": distilled.outcome,
+            "outcome_source": distilled.outcome_source,
             "significance": distilled.significance,
             "duration": distilled.duration_human,
             "tokens": distilled.tokens_total,
@@ -81,7 +83,7 @@ class ObsidianExporter:
             lines.append("")
 
         if distilled.decisions:
-            lines.append("## Decisions")
+            lines.append("## Decision Candidates (unverified)")
             lines.append("")
             for d in distilled.decisions:
                 lines.append(f"- {d}")

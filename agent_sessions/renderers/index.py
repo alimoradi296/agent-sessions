@@ -27,7 +27,7 @@ class IndexRenderer:
         return (
             f"| `{session.id[:8]}…` "
             f"| {session.agent.value} "
-            f"| {session.date_str} "
+            f"| {session.date_str}{' (file mtime)' if session.date_source == 'file_mtime' else ''} "
             f"| `{session.branch}` "
             f"| {session.duration_human} "
             f"| {msg_count} "

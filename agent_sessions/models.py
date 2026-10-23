@@ -42,17 +42,24 @@ class Message:
     timestamp: Optional[datetime] = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
+    phase: str = ""
+    source_path: str = ""
+    source_line: Optional[int] = None
 
 
 @dataclass
 class ToolCall:
     name: str
     input_summary: str  # truncated JSON of input
+    call_id: str = ""
+    arguments: str = ""
 
 
 @dataclass
 class ToolResult:
     content: str  # truncated result text
+    call_id: str = ""
+    is_error: Optional[bool] = None
 
 
 @dataclass
@@ -71,6 +78,10 @@ class Session:
     messages: list[Message] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
     source_path: str = ""
+    source_paths: list[str] = field(default_factory=list)
+    model_provider: str = ""
+    project_slug: str = ""
+    observed_at: Optional[datetime] = None
 
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -95,7 +106,17 @@ class Session:
     def date_str(self) -> str:
         if self.started_at:
             return self.started_at.strftime("%Y-%m-%d")
+        if self.observed_at:
+            return self.observed_at.strftime("%Y-%m-%d")
         return ""
+
+    @property
+    def date_source(self) -> str:
+        if self.started_at:
+            return "transcript"
+        if self.observed_at:
+            return "file_mtime"
+        return "unknown"
 
     @property
     def message_count(self) -> int:

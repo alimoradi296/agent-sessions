@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -41,9 +42,9 @@ class CursorParser:
         base = cls.find_sessions_dir()
         if not base.exists():
             return None
-        expected = base / "**" / "agent-transcripts" / session_id / f"{session_id}.jsonl"
-        for path in base.rglob(f"agent-transcripts/{session_id}/{session_id}.jsonl"):
-            return path
+        for path in cls.list_sessions():
+            if path.stem == session_id:
+                return path
         return None
 
     @classmethod
@@ -64,8 +65,10 @@ class CursorParser:
             return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
 
         paths = []
-        for jsonl in base.rglob("agent-transcripts/*/*.jsonl"):
-            paths.append(jsonl)
+        for project in base.iterdir():
+            target = project / "agent-transcripts"
+            if target.is_dir():
+                paths.extend(p for p in target.glob("*/*.jsonl") if p.parent.name == p.stem)
         return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
 
     @classmethod
@@ -77,7 +80,7 @@ class CursorParser:
         aborted = False
 
         with open(path) as f:
-            for line in f:
+            for line_number, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
@@ -85,24 +88,31 @@ class CursorParser:
                     d = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(d, dict):
+                    continue
 
                 role = d.get("role")
                 event_type = d.get("type")
 
                 if role in ("user", "assistant"):
-                    text, tools, results = _extract_content(d.get("message", {}).get("content", ""))
-                    if not text and not tools:
+                    message = d.get("message") or {}
+                    text, tools, results = _extract_content(message.get("content", "") if isinstance(message, dict) else "")
+                    if not text and not tools and not results:
                         continue
 
                     if role == "user" and first_user_text is None and text:
                         first_user_text = text
 
-                    messages.append(Message(
-                        role=role,
-                        text=text,
-                        tool_calls=tools,
-                        tool_results=results,
-                    ))
+                    if text or tools:
+                        messages.append(Message(
+                            role=role, text=text, tool_calls=tools,
+                            source_path=str(path), source_line=line_number,
+                        ))
+                    if results:
+                        messages.append(Message(
+                            role="tool", text="", tool_results=results,
+                            source_path=str(path), source_line=line_number,
+                        ))
 
                 elif event_type == "turn_ended":
                     if d.get("status") == "aborted":
@@ -127,27 +137,26 @@ class CursorParser:
                     title = ln[:120]
                     break
 
-        cwd = ""
+        slug = ""
         parts = path.parts
         try:
             proj_idx = parts.index("projects")
             slug = parts[proj_idx + 1]
-            cwd = "/" + slug.replace("-", "/")
         except (ValueError, IndexError):
             pass
 
         stat = path.stat()
-        from datetime import datetime, timezone
-        ended_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        observed_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
 
         return Session(
             id=session_id,
             agent=Agent.CURSOR,
             title=title,
-            cwd=cwd,
-            ended_at=ended_at,
+            project_slug=slug,
+            observed_at=observed_at,
             messages=messages,
             source_path=str(path),
+            source_paths=[str(path)],
         )
 
 
@@ -170,12 +179,14 @@ def _extract_content(content) -> tuple[str, list[ToolCall], list[ToolResult]]:
             text_parts.append(block.get("text", ""))
         elif btype == "tool_use":
             name = block.get("name", "tool")
-            inp = json.dumps(block.get("input", {}), ensure_ascii=False)[:300]
-            tools.append(ToolCall(name=name, input_summary=inp))
+            inp = json.dumps(block.get("input", {}), ensure_ascii=False)
+            tools.append(ToolCall(name=name, input_summary=inp[:300], arguments=inp,
+                                  call_id=block.get("id", "")))
         elif btype == "tool_result":
             rc = block.get("content", "")
             if isinstance(rc, list):
                 rc = " ".join(c.get("text", "") for c in rc if isinstance(c, dict))
-            results.append(ToolResult(content=str(rc)[:500]))
+            results.append(ToolResult(content=str(rc), call_id=block.get("tool_use_id", ""),
+                                      is_error=block.get("is_error")))
 
     return "\n".join(p for p in text_parts if p), tools, results

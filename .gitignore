@@ -6,3 +6,18 @@ build/
 
 .venv/
 demo-output/
+# Private transcripts and generated session data. Tests generate synthetic
+# inputs in temporary directories; no real transcripts belong in this repo.
+*.jsonl
+*.jsonl.gz
+.agent-sessions/
+exports/
+transcripts/
+docs/sessions/
+context-packs/
+sessions.json
+SESSION_INDEX.md
+coverage.json
+*.distilled.json
+sessions_graph.json
+agent-sessions-report*.md

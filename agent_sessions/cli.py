@@ -18,15 +18,18 @@ import argparse
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
 from agent_sessions.analysis.distiller import Distiller, DistilledSession
+from agent_sessions.analysis.context import build_context
 from agent_sessions.analysis.linker import build_graph, load_distilled_sessions, query_graph
 from agent_sessions.analysis.obsidian import ObsidianExporter
 from agent_sessions.analysis.report import WeeklyReport, week_start
 from agent_sessions.models import Agent, Session
 from agent_sessions.parsers import PARSERS
+from agent_sessions.parsers.codex import CodexParser
 from agent_sessions.renderers.index import IndexRenderer
 from agent_sessions.renderers.json_index import JsonIndexRenderer
 from agent_sessions.renderers.markdown import MarkdownRenderer
@@ -64,6 +67,14 @@ def export_session(session: Session, out_dir: Path, dry_run: bool = False) -> No
     print(f"Exported → {md_path}")
 
 
+def load_source_session(agent: str, session_id: str) -> Optional[Session]:
+    parser_cls = PARSERS[agent]
+    if agent == "codex":
+        return CodexParser.parse_many(CodexParser.find_session_files(session_id))
+    path = parser_cls.find_session_file(session_id)
+    return parser_cls.parse(path) if path else None
+
+
 # ── Hook entry point ────────────────────────────────────────────────────────
 # Called by agent Stop hooks: reads JSON from stdin
 
@@ -84,11 +95,7 @@ def cmd_hook(args: argparse.Namespace) -> None:
     if not parser_cls:
         return
 
-    path = parser_cls.find_session_file(session_id)
-    if not path:
-        return
-
-    session = parser_cls.parse(path)
+    session = load_source_session(agent_name, session_id)
     if not session:
         return
 
@@ -104,14 +111,9 @@ def cmd_export(args: argparse.Namespace) -> None:
         print(f"Unknown agent: {args.agent}", file=sys.stderr)
         sys.exit(1)
 
-    path = parser_cls.find_session_file(args.session_id)
-    if not path:
-        print(f"Session not found: {args.session_id}", file=sys.stderr)
-        sys.exit(1)
-
-    session = parser_cls.parse(path)
+    session = load_source_session(args.agent, args.session_id)
     if not session:
-        print("Session has no messages.", file=sys.stderr)
+        print("Session not found or has no messages.", file=sys.stderr)
         sys.exit(1)
 
     out_dir = Path(args.output) if args.output else resolve_output_dir(args.cwd)
@@ -124,6 +126,11 @@ def cmd_bulk(args: argparse.Namespace) -> None:
     agents = [args.agent] if args.agent else list(PARSERS.keys())
     out_dir = Path(args.output) if args.output else resolve_output_dir(args.cwd)
 
+    since = getattr(args, "since", None)
+    until = getattr(args, "until", None)
+    if since and until and since >= until:
+        raise ValueError("--until must be after --since")
+    coverage = []
     total = 0
     for agent_name in agents:
         parser_cls = PARSERS[agent_name]
@@ -134,13 +141,52 @@ def cmd_bulk(args: argparse.Namespace) -> None:
         else:
             paths = parser_cls.list_sessions()
 
+        groups: dict[str, list[Path]] = {}
         for path in paths:
-            session = parser_cls.parse(path)
+            try:
+                key = CodexParser.session_id(path) if agent_name == "codex" else str(path)
+            except (OSError, UnicodeError) as error:
+                coverage.append({"agent": agent_name, "source_path": str(path),
+                                 "status": "error", "error_type": type(error).__name__})
+                continue
+            groups.setdefault(key, []).append(path)
+        for group in groups.values():
+            try:
+                session = (CodexParser.parse_many(group) if agent_name == "codex"
+                           else parser_cls.parse(group[0]))
+            except (OSError, UnicodeError) as error:
+                coverage.extend({"agent": agent_name, "source_path": str(path),
+                                 "status": "error", "error_type": type(error).__name__}
+                                for path in group)
+                continue
+            status = "empty"
             if session:
-                export_session(session, out_dir, dry_run=args.dry_run)
-                total += 1
+                status = "exported"
+                if ((since and session.date_str < since)
+                        or (until and session.date_str >= until)):
+                    status = "outside_period"
+                if status == "exported":
+                    export_session(session, out_dir, dry_run=args.dry_run)
+                    total += 1
+            coverage.extend({
+                "agent": agent_name, "source_path": str(path), "status": status,
+                "session_id": session.id if session else None,
+                "date": session.date_str if session else None,
+                "date_source": session.date_source if session else "unknown",
+            } for path in group)
+
+    if getattr(args, "coverage", False) and not args.dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "coverage.json").write_text(json.dumps({
+            "version": 1, "source_files": len(coverage),
+            "exported_sessions": total, "sources": coverage,
+        }, indent=2) + "\n", encoding="utf-8")
 
     print(f"\nExported {total} sessions to {out_dir}")
+    errors = sum(row["status"] == "error" for row in coverage)
+    if errors:
+        print(f"Could not read {errors} source file(s). Check coverage.json when enabled.", file=sys.stderr)
+        sys.exit(1)
 
 
 # ── Search command ──────────────────────────────────────────────────────────
@@ -270,11 +316,9 @@ def cmd_distill(args: argparse.Namespace) -> None:
         # Try re-parsing from source for richer tool data
         agent = meta.get("agent")
         if agent and agent in PARSERS:
-            src = PARSERS[agent].find_session_file(sid)
-            if src:
-                session = PARSERS[agent].parse(src)
-                if session:
-                    distilled = Distiller.distill(session)
+            session = load_source_session(agent, sid)
+            if session:
+                distilled = Distiller.distill(session)
 
         if distilled is None and md_path.exists():
             distilled = Distiller.distill_from_markdown(md_path, meta)
@@ -406,6 +450,18 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(text)
 
 
+def cmd_context(args: argparse.Namespace) -> None:
+    directory = Path(args.directory) if args.directory else resolve_output_dir(None)
+    text = build_context(directory, args.query, args.last)
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"Context pack → {out}")
+    else:
+        print(text, end="")
+
+
 # ── Install command ─────────────────────────────────────────────────────────
 
 CLAUDE_HOOK_SCRIPT = """\
@@ -483,7 +539,7 @@ def cmd_install(args: argparse.Namespace) -> None:
         print(json.dumps({
             "hooks": {
                 "agent-end": [{
-                    "command": "python3 -m agent_sessions hook",
+                    "command": "python3 -m agent_sessions hook --agent cursor",
                     "timeout": 15,
                 }]
             }
@@ -529,6 +585,16 @@ def cmd_install(args: argparse.Namespace) -> None:
 
 # ── Main ────────────────────────────────────────────────────────────────────
 
+def iso_date(value: str) -> str:
+    try:
+        parsed = date.fromisoformat(value)
+        if parsed.isoformat() != value:
+            raise ValueError
+        return value
+    except ValueError:
+        raise argparse.ArgumentTypeError("Use a date in YYYY-MM-DD format")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="agent-sessions",
@@ -555,6 +621,9 @@ def main() -> None:
     p_bulk.add_argument("-o", "--output", help="Output directory")
     p_bulk.add_argument("--cwd", help="Project working directory")
     p_bulk.add_argument("--dry-run", action="store_true", help="Show what would be exported")
+    p_bulk.add_argument("--since", type=iso_date, help="Session date on/after YYYY-MM-DD")
+    p_bulk.add_argument("--until", type=iso_date, help="Session date before YYYY-MM-DD (exclusive)")
+    p_bulk.add_argument("--coverage", action="store_true", help="Write local coverage.json with source file statuses")
 
     # search
     p_search = sub.add_parser("search", help="Search exported sessions")
@@ -599,11 +668,19 @@ def main() -> None:
     p_report.add_argument("--since", help="Sessions on/after date (YYYY-MM-DD)")
     p_report.add_argument("-o", "--output", help="Write report to file")
 
+    p_context = sub.add_parser("context", help="Build a local pack of cited transcript excerpts")
+    p_context.add_argument("query", help="Literal topic text to find in conversations")
+    p_context.add_argument("-d", "--directory", help="Exported sessions directory")
+    p_context.add_argument("--last", type=int, default=5, help="Maximum matching sessions (default: 5)")
+    p_context.add_argument("-o", "--output", help="Write the pack to a local file")
+
     # install
     p_install = sub.add_parser("install", help="Install the Stop hook for an agent")
     p_install.add_argument("agent", choices=["claude", "codex", "cursor"])
 
     args = parser.parse_args()
+    if args.command == "bulk" and args.since and args.until and args.since >= args.until:
+        parser.error("--until must be after --since")
 
     if args.command == "hook":
         cmd_hook(args)
@@ -623,6 +700,8 @@ def main() -> None:
         cmd_to_obsidian(args)
     elif args.command == "report":
         cmd_report(args)
+    elif args.command == "context":
+        cmd_context(args)
     elif args.command == "install":
         cmd_install(args)
     else:

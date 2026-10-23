@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from agent_sessions.models import Session
+from agent_sessions.analysis.transcript import clean_knowledge_text, conversation_sections
 
 # ── Patterns ────────────────────────────────────────────────────────────────
 
@@ -42,8 +43,6 @@ DECISION_PATTERNS = [
     for p in [
         r"(?:decided|decision)[:\s]+(.{15,200})",
         r"(?:going with|we(?:'ll| will) use|chose to use)\s+(.{15,200})",
-        r"(?:instead of|rather than)\s+(.{15,200})",
-        r"(?:do not|don't|never)\s+(?:add|use|create|revert)\s+(.{15,200})",
     ]
 ]
 
@@ -67,11 +66,11 @@ OUTCOME_KEYWORDS = {
     "tested": ["test", "pytest", "regression", "coverage"],
 }
 
-COMMAND_PATTERN = re.compile(r"(?:^|\s)/([a-zA-Z][\w-]{3,})", re.MULTILINE)
+COMMAND_PATTERN = re.compile(r"(?:^|\s)/([a-zA-Z][\w-]{3,})(?![\w/-])", re.MULTILINE)
 CURSOR_CMD_PATTERN = re.compile(r"Cursor Command:\s*([\w/-]+)")
 PATH_LIKE_COMMANDS = frozenset({
-    "apps", "docs", "home", "empty", "api", "v1", "dev", "null", "Regal",
-    "regal_backend", "regal_front", "components", "settings", "services",
+    "apps", "docs", "home", "empty", "api", "v1", "dev", "null",
+    "components", "settings", "services",
     "middleware", "users", "apis", "auth", "token", "login", "presence",
 })
 
@@ -105,7 +104,9 @@ class DistilledSession:
     open_questions: list[str] = field(default_factory=list)
 
     summary: str = ""
-    distill_version: int = 1
+    date_source: str = "unknown"
+    outcome_source: str = "heuristic_unverified"
+    distill_version: int = 2
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -128,17 +129,18 @@ class Distiller:
     @classmethod
     def distill(cls, session: Session) -> DistilledSession:
         full_text = cls._full_text(session)
+        knowledge_text = cls._knowledge_text(session)
         files = cls._extract_files(session, full_text)
         prds = cls._extract_prds(full_text)
         tools = cls._extract_tools(session)
         commands = cls._extract_commands(full_text)
-        deferred = cls._extract_matches(full_text, DEFERRED_PATTERNS, max_items=5)
-        decisions = cls._extract_matches(full_text, DECISION_PATTERNS, max_items=5)
-        bugs = cls._extract_matches(full_text, BUG_PATTERNS, max_items=5)
-        questions = cls._extract_questions(full_text)
-        outcome = cls._infer_outcome(full_text, session.title)
+        deferred = cls._extract_matches(knowledge_text, DEFERRED_PATTERNS, max_items=5)
+        decisions = cls._extract_matches(knowledge_text, DECISION_PATTERNS, max_items=5)
+        bugs = cls._extract_matches(knowledge_text, BUG_PATTERNS, max_items=5)
+        questions = cls._extract_questions(knowledge_text)
+        outcome = cls._infer_outcome(knowledge_text, session.title)
         topic = cls._infer_topic(session, prds)
-        project = cls._infer_project(session.cwd)
+        project = session.project_slug or cls._infer_project(session.cwd)
         significance = cls._score(session, prds, files, decisions, deferred, bugs)
 
         return DistilledSession(
@@ -149,6 +151,7 @@ class Distiller:
             project=project,
             branch=session.branch,
             date=session.date_str,
+            date_source=session.date_source,
             duration_seconds=session.duration_seconds,
             duration_human=session.duration_human,
             tokens_total=session.usage.total_tokens,
@@ -177,17 +180,20 @@ class Distiller:
 
         session_id = md_path.stem
         full_text = content
+        # Export headers, tool evidence, and arbitrary source code are not
+        # decision text. Only conversation sections feed knowledge heuristics.
+        knowledge_text = "\n".join(text for _, text in conversation_sections(content))
 
         prds = cls._extract_prds(full_text)
         files = cls._extract_files_from_text(full_text)
         tools = cls._extract_tools_from_text(full_text)
         commands = cls._extract_commands(full_text)
-        deferred = cls._extract_matches(full_text, DEFERRED_PATTERNS, max_items=5)
-        decisions = cls._extract_matches(full_text, DECISION_PATTERNS, max_items=5)
-        bugs = cls._extract_matches(full_text, BUG_PATTERNS, max_items=5)
-        questions = cls._extract_questions(full_text)
+        deferred = cls._extract_matches(knowledge_text, DEFERRED_PATTERNS, max_items=5)
+        decisions = cls._extract_matches(knowledge_text, DECISION_PATTERNS, max_items=5)
+        bugs = cls._extract_matches(knowledge_text, BUG_PATTERNS, max_items=5)
+        questions = cls._extract_questions(knowledge_text)
         title = content.split("\n")[0].lstrip("# ").strip() if content else "Untitled"
-        outcome = cls._infer_outcome(full_text, title)
+        outcome = cls._infer_outcome(knowledge_text, title)
         topic = cls._infer_topic_from_title(title, prds)
         significance = cls._score_from_meta(meta, prds, files, decisions, deferred, bugs)
 
@@ -199,6 +205,7 @@ class Distiller:
             project=cls._infer_project(meta.get("cwd", "")),
             branch=meta.get("branch", "unknown"),
             date=meta.get("date", ""),
+            date_source=meta.get("date_source", "unknown"),
             duration_seconds=meta.get("duration_seconds"),
             duration_human=meta.get("duration_human", "unknown"),
             tokens_total=meta.get("tokens", {}).get("total", 0),
@@ -239,6 +246,12 @@ class Distiller:
             for tc in msg.tool_calls:
                 parts.append(f"{tc.name} {tc.input_summary}")
         return "\n".join(parts)
+
+    @classmethod
+    def _knowledge_text(cls, session: Session) -> str:
+        return "\n".join(clean_knowledge_text(msg.text) for msg in session.messages
+                         if msg.role in ("user", "assistant") and msg.phase not in ("analysis", "commentary"))
+
 
     @staticmethod
     def _extract_prds(text: str) -> list[str]:
@@ -379,9 +392,6 @@ class Distiller:
         if not cwd:
             return "unknown"
         parts = Path(cwd).parts
-        for name in ("regal_backend", "regal_front", "regal_frontend"):
-            if name in parts:
-                return name
         return parts[-1] if parts else "unknown"
 
     @staticmethod

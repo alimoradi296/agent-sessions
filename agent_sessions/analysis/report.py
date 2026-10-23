@@ -55,6 +55,10 @@ class WeeklyReport:
         lines.append(f"- **Messages:** {total_messages:,}")
         lines.append(f"- **Tokens:** {total_tokens:,}")
         lines.append(f"- **Duration:** {total_duration / 3600:.1f}h")
+        estimated = sum(s.get("date_source") == "file_mtime" for s in self.sessions)
+        if estimated:
+            lines.append(f"- **Estimated dates:** {estimated} session(s) use file modification time.")
+        lines.append("- Duration is elapsed session time. It does not measure active work.")
         lines.append("")
 
         # By agent
@@ -137,7 +141,7 @@ class WeeklyReport:
             lines.append("")
 
         if outcome_counter:
-            lines.append("### Outcomes")
+            lines.append("### Inferred Outcomes (unverified)")
             lines.append("")
             for outcome, count in outcome_counter.most_common():
                 lines.append(f"- {outcome}: {count}")
@@ -153,7 +157,7 @@ class WeeklyReport:
             lines.append("")
 
         if all_decisions:
-            lines.append("### Recent Decisions")
+            lines.append("### Decision Candidates (unverified)")
             lines.append("")
             for dec in all_decisions[:8]:
                 lines.append(f"- {dec[:120]}")
