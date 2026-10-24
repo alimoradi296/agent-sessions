@@ -134,14 +134,17 @@ agent-sessions context "example cache" --last 5 \
 - [x] Include cleaned section references, selection reasons, and explicit budget omissions.
 - [x] Preserve complete turns within a configurable character budget.
 - [x] Use synthetic regression tests for topic drift, nearby corrections, ranking, and long deliverables.
+- [x] Add an optional structured handoff with cited historical requests, decision candidates, reported blockers, results, and next actions.
+- [x] Preserve unclassified source excerpts and exclude shortened fragments from claim classification.
+- [x] Keep checked results explicitly unestablished until independent verification exists.
 
-Ranking uses literal matches and English clarification cues. It does not resolve conflicts or establish verified decisions.
+Ranking uses literal matches and English clarification cues. Structured fields use English extraction rules.
+Neither format resolves conflicts or establishes verified decisions.
 Independent fresh-session evaluation remains open.
 
 ### Context Bridge remaining
 
 - [ ] Connect conflicting or superseded decisions with their evidence.
-- [ ] Add a structured handoff with decisions, blockers, and checked results.
 - [ ] Evaluate a handoff in a fresh session before claiming that it prevents repeated explanations.
 - [ ] Add optional target formats after checking actual integration requirements.
 

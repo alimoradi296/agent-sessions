@@ -15,8 +15,10 @@ from pathlib import Path
 from agent_sessions.analysis.transcript import clean_knowledge_text, conversation_sections
 from agent_sessions.models import Session
 
-METHOD = 'english_rules_v1'
+METHOD = 'english_rules_v2'
 RULES = [
+    ('reported_blocker', r"^(?:blocker|blocked(?: by)?|waiting for)\s*:"),
+    ('next_action', r"^next (?:action|step)(?:s)?\s*:"),
     ('proposal', r"^(?:proposal|recommendation)\s*:|^(?:I|we)\s+(?:propose|suggest|recommend|could|should|will use)\b|^consider\b"),
     ('decision_candidate', r"^decision\s*:|^(?:we|I)\s+(?:decided|chose)\b|^decided\s+(?:to|on)\b"),
     ('deferred', r"^(?:deferred?|out of scope(?: for now)?|TODO|FIXME)\s*:|^will (?:do|handle|address) (?:this )?later\b"),
@@ -44,6 +46,10 @@ def classify(text: str, role: str) -> str | None:
                 r'\b(?:will|would|might|could|should)\b', normalized, re.IGNORECASE)):
             continue
         match = pattern.search(normalized)
+        if match and kind in ('reported_blocker', 'next_action') and re.fullmatch(
+                r'(?:none|no (?:blockers?|next actions?)|not blocked|resolved)[.!]?',
+                normalized[match.end():].strip(), re.IGNORECASE):
+            continue
         if match and normalized[match.end():].strip():
             return kind
         if match and kind in ('reported_result', 'open_question') and not normalized.endswith(':'):
@@ -77,13 +83,19 @@ def claims_from_session(session: Session) -> list[dict]:
     return claims
 
 
-def claims_from_markdown(path: Path, content: str, agent: str) -> list[dict]:
+def claims_from_sections(path: Path, sections: list[tuple[int, str, str]], agent: str) -> list[dict]:
+    """Extract complete sections, retaining their original one-based coordinates."""
     claims = []
-    for i, (role, text) in enumerate(conversation_sections(content), 1):
+    for i, role, text in sections:
         claims.extend(_from_text(text, role.lower(), dict(
             session_id=path.stem, agent=agent, source='export_section',
             conversation_section=i, source_path=str(path.resolve()), source_line=None)))
     return claims
+
+
+def claims_from_markdown(path: Path, content: str, agent: str) -> list[dict]:
+    sections = [(i, role, text) for i, (role, text) in enumerate(conversation_sections(content), 1)]
+    return claims_from_sections(path, sections, agent)
 
 
 def render_claim(claim: dict) -> str:

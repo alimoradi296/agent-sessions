@@ -320,5 +320,89 @@
     "expected": [
       "reported_result"
     ]
+  },
+  {
+    "name": "explicit blocker",
+    "role": "assistant",
+    "text": "Blocker: the synthetic API contract needs review.",
+    "expected": [
+      "reported_blocker"
+    ]
+  },
+  {
+    "name": "blocked by dependency",
+    "role": "user",
+    "text": "Blocked by: missing synthetic reviewer approval.",
+    "expected": [
+      "reported_blocker"
+    ]
+  },
+  {
+    "name": "waiting for approval",
+    "role": "assistant",
+    "text": "Waiting for: a synthetic product decision.",
+    "expected": [
+      "reported_blocker"
+    ]
+  },
+  {
+    "name": "explicit next action",
+    "role": "assistant",
+    "text": "Next action: review the synthetic contract.",
+    "expected": [
+      "next_action"
+    ]
+  },
+  {
+    "name": "explicit next step",
+    "role": "assistant",
+    "text": "Next step: inspect the synthetic example.",
+    "expected": [
+      "next_action"
+    ]
+  },
+  {
+    "name": "no blocker",
+    "role": "assistant",
+    "text": "Blocker: none.",
+    "expected": []
+  },
+  {
+    "name": "resolved blocker",
+    "role": "assistant",
+    "text": "Blocked: resolved.",
+    "expected": []
+  },
+  {
+    "name": "no next action",
+    "role": "assistant",
+    "text": "Next action: none.",
+    "expected": []
+  },
+  {
+    "name": "bare blocker heading",
+    "role": "assistant",
+    "text": "Blocker:",
+    "expected": []
+  },
+  {
+    "name": "bare next step heading",
+    "role": "assistant",
+    "text": "Next step:",
+    "expected": []
+  },
+  {
+    "name": "none of tests is a real reported blocker",
+    "role": "assistant",
+    "text": "Blocker: none of the synthetic tests passed.",
+    "expected": [
+      "reported_blocker"
+    ]
+  },
+  {
+    "name": "explicit no blockers",
+    "role": "assistant",
+    "text": "Blocker: no blockers.",
+    "expected": []
   }
 ]

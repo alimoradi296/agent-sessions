@@ -32,7 +32,8 @@ agent_sessions/
     obsidian.py       — distilled → Obsidian notes
     report.py         — weekly reports
     doctor.py         — read-only archive and hook diagnostics
-    context.py        — cited, unverified conversation excerpts
+    context.py        — shared source selection and cited conversation excerpts
+    handoff.py        — structured claim groups with evidence excerpts
     transcript.py     — conversation prose filtering
 v1/                   — original naive implementation (preserved for history)
 v2/                   — claude-only smart implementation (preserved for history)

@@ -30,6 +30,7 @@ from typing import Optional
 
 from agent_sessions.analysis.distiller import Distiller, DistilledSession
 from agent_sessions.analysis.context import DEFAULT_MAX_CHARS, build_context
+from agent_sessions.analysis.handoff import build_handoff
 from agent_sessions.analysis.doctor import Doctor, render_doctor
 from agent_sessions.analysis.linker import build_graph, load_distilled_sessions, query_graph
 from agent_sessions.analysis.obsidian import ObsidianExporter
@@ -501,7 +502,8 @@ def cmd_report(args: argparse.Namespace) -> None:
 def cmd_context(args: argparse.Namespace) -> None:
     directory = Path(args.directory) if args.directory else Path.home() / ".agent-sessions" / "exports"
     try:
-        text = build_context(directory, args.query, args.last, args.max_chars)
+        builder = build_handoff if args.format == "handoff" else build_context
+        text = builder(directory, args.query, args.last, args.max_chars)
     except ValueError as error:
         raise StorageError(str(error)) from error
     if args.output:
@@ -722,6 +724,7 @@ def main() -> None:
     p_context.add_argument("-d", "--directory", help="Exported sessions directory")
     p_context.add_argument("--last", type=positive_int, default=5, help="Maximum sources, ranked by relevance (default: 5)")
     p_context.add_argument("--max-chars", type=positive_int, default=DEFAULT_MAX_CHARS, help="Excerpt character budget per source (default: 24000)")
+    p_context.add_argument("--format", choices=("excerpts", "handoff"), default="excerpts", help="Output format (default: excerpts)")
     p_context.add_argument("-o", "--output", help="Write the pack to a local file")
 
     p_reconcile = sub.add_parser("reconcile", help="Export only missing or changed local sessions")

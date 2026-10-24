@@ -10,12 +10,14 @@ New distilled files use `distill_version: 3` and include a `claims` array.
 | `request` | A user asks for an action. This does not establish that the action occurred. |
 | `proposal` | A speaker proposes an approach or states an intention. |
 | `decision_candidate` | A speaker explicitly states a decision. Acceptance and current applicability remain unverified. |
+| `reported_blocker` | A speaker explicitly reports a blocker or dependency. Its current state remains unverified. |
+| `next_action` | A speaker explicitly names a next action. This is historical reference, not current authorization. |
 | `reported_result` | A speaker reports an action or result. Execution and deployment remain unverified. |
 | `bug_report` | A speaker reports a bug or cause. |
 | `deferred` | A speaker identifies work as deferred or outside scope. |
 | `open_question` | A speaker asks a recognized unresolved question. |
 
-Each claim has `verification: "not_checked"` and `method: "english_rules_v1"`.
+Each claim has `verification: "not_checked"` and `method: "english_rules_v2"`.
 `checked_result` is reserved for a future independent evidence-review workflow. The extractor never emits it.
 A statement such as “Verified: tests passed” remains a reported result.
 Reading a test definition does not establish a passing test run. A reported local test does not establish production behavior.
@@ -28,7 +30,7 @@ This synthetic example shows a result reported in a source transcript:
 {
   "kind": "reported_result",
   "text": "Tests passed for the example module.",
-  "method": "english_rules_v1",
+  "method": "english_rules_v2",
   "verification": "not_checked",
   "evidence": {
     "session_id": "synthetic-example",
@@ -77,6 +79,7 @@ Distilled files use atomic replacement and owner-only file permissions on POSIX 
 ## Synthetic evaluation
 
 The labeled cases in `tests/fixtures/claim_labels.json` contain invented conversations.
+Version 2 of the rules adds explicit blocker and next-action labels. Existing version 1 claims remain readable.
 They include positive examples, requests, hypothetical results, undecided wording, excluded content, and language abstention.
 These cases establish regression behavior for the current rules. They do not measure general extraction accuracy.
 

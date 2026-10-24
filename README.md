@@ -367,7 +367,7 @@ Each new `.distilled.json` contains:
 - Legacy decision, bug, deferred-work, and question fields for compatibility.
 - A significance score for filtering.
 
-Claim types distinguish requests, proposals, decision candidates, reported results, bug reports, deferred work, and open questions.
+Claim types distinguish requests, proposals, decision candidates, reported blockers, reported results, proposed next actions, bug reports, deferred work, and open questions.
 All extracted claims have `verification: "not_checked"`.
 Words such as “verified” and “checked” remain speaker reports. They do not establish independent verification.
 Requests, proposals, titles, and summaries do not establish completed work.
@@ -416,6 +416,27 @@ The command does not call an LLM or change agent configuration.
 Pack generation reads the exports without modifying them.
 An explicit `-o` destination uses atomic replacement with owner-only file permissions on POSIX systems.
 Independent fresh-session usefulness remains unverified.
+
+### Structured handoff
+
+```bash
+agent-sessions context "example cache" --format handoff --last 2 \
+  -d /path/to/private-exports/ -o /path/to/private-handoff.md
+```
+
+This format groups historical requests, decision candidates, reported blockers, reported results, explicit next actions, proposals, and open questions.
+Each claim includes its speaker, quote, and source coordinates.
+The handoff uses complete selected excerpts directly. It does not require a previous `distill` run.
+Unclassified wording remains in the evidence appendix.
+
+The checked-results section stays empty because this command does not perform independent verification.
+Conflicts remain unresolved, and historical requests do not authorize current actions.
+Missing fields mean not established in selected excerpts. They do not establish that no blockers or actions exist.
+Shortened excerpts remain visible but do not feed classification.
+Summary claims repeat source text beyond the excerpt character budget.
+
+Use the existing default format for an excerpt pack. Both formats keep the same source selection and privacy behavior.
+See [structured handoff limits](docs/handoff.md) for the evidence rules and review procedure.
 
 ### Link related sessions
 
