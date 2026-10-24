@@ -25,3 +25,4 @@ doctor-report*.json
 doctor-report*.txt
 .agent-sessions.lock
 .agent-sessions-*.tmp
+*.agent-sessions-backup-*

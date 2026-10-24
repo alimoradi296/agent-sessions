@@ -52,11 +52,15 @@ An implemented feature is not a guarantee of compatibility with every agent vers
 - [x] Fail on invalid indexes and lock timeouts without silently discarding existing entries.
 - [x] Match Markdown index entries by full session ID and keep each new row on one line.
 - [x] Test concurrent processes, write failures, and process termination with synthetic fixtures.
+- [x] Install Codex `Stop` and Cursor `stop` handlers with pinned Python launchers and private output destinations.
+- [x] Preserve unrelated hooks, back up changed files, and migrate this exporter's legacy Cursor event.
+- [x] Accept Cursor conversation IDs and transcript hints. Keep hook stdout valid JSON.
+- [x] Test generated launchers from unrelated working directories with synthetic transcripts and isolated homes.
 
 ### Remaining
 
 - [ ] Add a scheduled reconciliation command or documented cron/systemd setup.
-- [ ] Check hook behavior against supported agent releases.
+- [ ] Check application-triggered hook execution after reload and trust review on supported agent releases.
 - [ ] Define support for child-agent transcripts and their parent relationships.
 - [ ] Check locking and interrupted writes on Windows.
 - [ ] Surface malformed records and unsupported event types in coverage reports.

@@ -17,6 +17,8 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import math
 import re
@@ -32,6 +34,7 @@ from agent_sessions.analysis.linker import build_graph, load_distilled_sessions,
 from agent_sessions.analysis.obsidian import ObsidianExporter
 from agent_sessions.analysis.report import WeeklyReport, week_start
 from agent_sessions.models import Agent, Session
+from agent_sessions.hook_setup import install_hooks
 from agent_sessions.parsers import PARSERS
 from agent_sessions.parsers.codex import CodexParser
 from agent_sessions.renderers.index import IndexRenderer
@@ -98,26 +101,49 @@ def load_source_session(agent: str, session_id: str) -> Optional[Session]:
 def cmd_hook(args: argparse.Namespace) -> None:
     try:
         payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return
-
-    agent_name = getattr(args, "agent", None) or "claude"
-    session_id = payload.get("session_id") or payload.get("sessionId") or payload.get("id", "")
-    cwd = payload.get("cwd") or payload.get("workspaceFolder", "")
-
-    if not session_id:
-        return
-
-    parser_cls = PARSERS.get(agent_name)
-    if not parser_cls:
-        return
-
-    session = load_source_session(agent_name, session_id)
-    if not session:
-        return
-
-    out_dir = resolve_output_dir(cwd)
-    export_session(session, out_dir, lock_timeout=getattr(args, "lock_timeout", DEFAULT_LOCK_TIMEOUT))
+    except (ValueError, UnicodeError) as error:
+        raise StorageError("Hook input must be a JSON object.") from error
+    if not isinstance(payload, dict):
+        raise StorageError("Hook input must be a JSON object.")
+    agent = getattr(args, "agent", None) or "claude"
+    keys = ("conversation_id", "session_id", "sessionId", "id") if agent == "cursor" else ("session_id", "sessionId", "id")
+    sid = next((payload.get(key) for key in keys if payload.get(key)), None)
+    validate_session_id(sid)
+    hint = payload.get("transcript_path")
+    if hint is not None and not isinstance(hint, str):
+        raise StorageError("Hook transcript_path must be a string or null.")
+    if hint:
+        path = Path(hint).expanduser().resolve()
+    else:
+        path = None
+    # Transcript paths are convenience hints. When an agent supplies text or
+    # no current file, discover its supported JSONL by the stable session ID.
+    if path is not None and path.suffix == ".jsonl" and path.is_file():
+        if agent == "cursor":
+            if path.stem != sid or path.parent.name != sid or path.parent.parent.name != "agent-transcripts":
+                raise StorageError("Cursor transcript_path does not match the main conversation.")
+            session = PARSERS[agent].parse(path)
+        elif agent == "codex":
+            if CodexParser.session_id(path) != sid:
+                raise StorageError("Codex transcript_path does not match the session ID.")
+            root = next((p for p in path.parents if p.name == "sessions" and p.parent.name == ".codex"), None)
+            if root is None:
+                raise StorageError("Codex transcript_path must be under a .codex/sessions directory.")
+            paths = [p for p in root.rglob("*.jsonl") if CodexParser.session_id(p) == sid]
+            session = CodexParser.parse_many(paths)
+        else:
+            session = load_source_session(agent, sid)
+    else:
+        session = load_source_session(agent, sid)
+    if session is None:
+        raise StorageError("No supported session transcript found. Run doctor to check source discovery.")
+    # Automatic hooks use a private global destination, never project docs.
+    output = getattr(args, "output", None)
+    out_dir = Path(output).expanduser() if output else Path.home() / ".agent-sessions/exports"
+    with contextlib.redirect_stdout(io.StringIO()):
+        export_session(session, out_dir, lock_timeout=getattr(args, "lock_timeout", DEFAULT_LOCK_TIMEOUT))
+    # Codex Stop requires JSON; Cursor stop accepts an empty response object.
+    print("{}")
 
 
 # ── Export command ──────────────────────────────────────────────────────────
@@ -501,33 +527,12 @@ set -euo pipefail
 cat | python3 -m agent_sessions hook
 """
 
-CODEX_HOOK_SCRIPT = """\
-#!/usr/bin/env bash
-set -euo pipefail
-
-INPUT=$(cat)
-
-# A Stop hook must write exactly one JSON object to stdout. Keep the export
-# asynchronous and silence all of its output so it cannot corrupt that reply.
-(
-  SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(d.get('session_id', ''))
-" 2>/dev/null || true)
-
-  if [[ -n "$SESSION_ID" ]]; then
-    agent-sessions export codex "$SESSION_ID" -o ~/.agent-sessions/exports/ >/dev/null 2>&1 || true
-  fi
-) >/dev/null 2>&1 &
-
-printf '{}\\n'
-"""
-
 def cmd_install(args: argparse.Namespace) -> None:
     agent = args.agent
 
     if agent == "claude":
+        if getattr(args, "dry_run", False) or getattr(args, "output", None):
+            raise StorageError("These install options currently apply to Codex and Cursor only.")
         scripts_dir = Path.home() / ".claude" / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         hook_path = scripts_dir / "export-session.sh"
@@ -563,51 +568,17 @@ def cmd_install(args: argparse.Namespace) -> None:
         else:
             print("Hook already installed.")
 
-    elif agent == "cursor":
-        print("Cursor hook installation:")
-        print("  Cursor uses hooks.json in .cursor/ — add this to your project's .cursor/hooks.json:")
-        print()
-        print(json.dumps({
-            "hooks": {
-                "agent-end": [{
-                    "command": "python3 -m agent_sessions hook --agent cursor",
-                    "timeout": 15,
-                }]
-            }
-        }, indent=2))
-
-    elif agent == "codex":
-        scripts_dir = Path.home() / ".codex" / "hooks"
-        scripts_dir.mkdir(parents=True, exist_ok=True)
-        hook_path = scripts_dir / "export-session.sh"
-        hook_path.write_text(CODEX_HOOK_SCRIPT)
-        hook_path.chmod(0o755)
-
-        settings_path = Path.home() / ".codex" / "hooks.json"
-        hook_entry = {
-            "type": "command",
-            "command": f"bash {hook_path}",
-            "timeout": 15,
-        }
-
-        if settings_path.exists():
-            settings = json.loads(settings_path.read_text())
-        else:
-            settings = {}
-
-        hooks = settings.setdefault("hooks", {})
-        stop_hooks = hooks.setdefault("Stop", [])
-        already = any(
-            h.get("command", "").endswith("export-session.sh")
-            for group in stop_hooks
-            for h in group.get("hooks", [])
-        )
-        if not already:
-            stop_hooks.append({"hooks": [hook_entry]})
-            settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-            print(f"Settings updated: {settings_path}")
-
-        print(f"Hook installed: {hook_path}")
+    elif agent in ("cursor", "codex"):
+        output = Path(args.output) if getattr(args, "output", None) else None
+        result = install_hooks(agent, output=output, dry_run=getattr(args, "dry_run", False))
+        action = ("Would update" if result["dry_run"] else "Updated") if result["changed"] else "Already current"
+        print(f"{action}: {result['config_path']}")
+        print(f"Launcher: {result['script_path']}")
+        print(f"Private exports: {result['output']}")
+        for backup in result["backups"]:
+            print(f"Backup: {backup}")
+        if agent == "codex":
+            print("Review changed hooks with /hooks before relying on automatic execution.")
 
     else:
         print(f"Unknown agent: {agent}", file=sys.stderr)
@@ -645,6 +616,7 @@ def main() -> None:
 
     # hook (stdin-driven, used by Stop hooks)
     p_hook = sub.add_parser("hook", help="Hook entry point (reads JSON from stdin)")
+    p_hook.add_argument("-o", "--output", help="Private export directory (default: ~/.agent-sessions/exports)")
     p_hook.add_argument("--agent", choices=list(PARSERS.keys()), default="claude", help="Which agent (default: claude)")
     p_hook.add_argument("--lock-timeout", type=lock_timeout, default=DEFAULT_LOCK_TIMEOUT, help="Seconds to wait for the export lock (default: 10)")
 
@@ -727,6 +699,8 @@ def main() -> None:
     # install
     p_install = sub.add_parser("install", help="Install the Stop hook for an agent")
     p_install.add_argument("agent", choices=["claude", "codex", "cursor"])
+    p_install.add_argument("-o", "--output", help="Private export directory for Codex/Cursor hooks")
+    p_install.add_argument("--dry-run", action="store_true", help="Inspect Codex/Cursor setup without writes")
 
     args = parser.parse_args()
     if args.command == "bulk" and args.since and args.until and args.since >= args.until:

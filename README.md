@@ -75,11 +75,10 @@ Review the output before a bulk export or hook installation.
 agent-sessions install claude
 ```
 
-### Cursor hook (manual setup):
+### Install the Cursor stop hook:
 
 ```bash
 agent-sessions install cursor
-# Prints the hooks.json snippet to add to your project
 ```
 
 ### Install the Codex Stop hook (requires a version with Stop hook support):
@@ -87,6 +86,38 @@ agent-sessions install cursor
 ```bash
 agent-sessions install codex
 ```
+
+Codex and Cursor installation writes user-level configuration in `~/.codex/hooks.json` or `~/.cursor/hooks.json`.
+The installer preserves unrelated hook entries and backs up each existing file before changing it.
+Repeated installation keeps one exporter entry. Cursor installation migrates this exporter's old `agent-end` entry to `stop`.
+
+The generated launcher pins the current Python interpreter and package location.
+It works outside the checkout without an activated environment or a matching `python3` on `PATH`.
+Reinstall the hook after moving the package or removing its Python environment.
+Hook installation currently supports POSIX systems.
+
+Preview the setup or choose another private export directory:
+
+```bash
+agent-sessions install cursor --dry-run
+agent-sessions install codex --dry-run
+agent-sessions install cursor --output /path/to/private-exports/
+```
+
+Automatic hooks default to `~/.agent-sessions/exports/`. They do not select a project's `docs/sessions/` directory.
+Each successful invocation writes one JSON object, `{}`, to stdout. Export diagnostics stay off stdout.
+Failures produce a nonzero exit status and a diagnostic on stderr. The hook does not request another agent turn.
+Cursor payloads use `conversation_id`. Codex payloads use `session_id`.
+Supported JSONL transcript paths identify the source directly. Other path hints fall back to session discovery.
+Codex exports still merge resumed segments before writing.
+
+Cursor reloads saved hook configuration. If it does not load, restart Cursor. See the [Cursor hook reference](https://prod.cursor.com/docs/hooks).
+Codex requires review and trust for new or changed non-managed hook definitions. Review the exporter with `/hooks`.
+See the [Codex hook reference](https://learn.chatgpt.com/docs/hooks).
+
+Direct launcher tests establish parsing, import resolution, export, and stdout behavior.
+They do not prove that an agent application loaded and triggered the hook.
+Generated launchers, backups, configuration, and smoke reports contain local paths. Keep these files outside public repositories.
 
 ## Usage
 
@@ -179,7 +210,7 @@ The checks cover:
 - Differences between current parser counts and exported message counts.
 - Missing transcripts, duplicate JSON entries, and inconsistent transcript metadata.
 - Missing, duplicate, or orphan entries in the Markdown index.
-- Invalid hook configuration and missing shell scripts referenced by hook commands.
+- Invalid hook configuration and missing Python or shell scripts referenced by hook commands.
 
 Each missing export refers to the selected export directory. An export can exist in another directory.
 The source scan uses the current parsers and can take time for a large archive.

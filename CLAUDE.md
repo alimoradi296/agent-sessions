@@ -12,6 +12,8 @@ agent_sessions/
   __main__.py         — `python3 -m agent_sessions` entry
   models.py           — Session, Message, TokenUsage, ToolCall dataclasses
   cli.py              — argparse CLI: hook, export, bulk, search, stats, install
+  hook_setup.py       — Codex/Cursor user-level configuration and pinned launchers
+  storage.py          — directory locks and atomic file replacement
   parsers/
     __init__.py       — PARSERS registry dict
     claude.py         — Claude Code JSONL parser
@@ -27,6 +29,9 @@ agent_sessions/
     linker.py         — cross-session graph
     obsidian.py       — distilled → Obsidian notes
     report.py         — weekly reports
+    doctor.py         — read-only archive and hook diagnostics
+    context.py        — cited, unverified conversation excerpts
+    transcript.py     — conversation prose filtering
 v1/                   — original naive implementation (preserved for history)
 v2/                   — claude-only smart implementation (preserved for history)
 ```
@@ -69,3 +74,5 @@ v2/                   — claude-only smart implementation (preserved for histor
 - Do not sort the index alphabetically — newest-first insertion order
 - Do not remove v1/ or v2/ — they document the evolution
 - Do not hardcode paths — use Path.home() and the resolution chain
+- Keep generated hook launchers, private configuration, backups, and transcript fixtures outside the repository.
+- Hook stdout must remain JSON. Test generated launchers from an unrelated directory with synthetic data.

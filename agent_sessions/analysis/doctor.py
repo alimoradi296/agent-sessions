@@ -215,6 +215,11 @@ class Doctor:
                     continue
                 if config.get('disableAllHooks') is True:
                     self.add('warning', 'hooks_disabled', 'Configuration disables all hooks.', agent=agent, path=str(path))
+                if agent == 'cursor':
+                    if type(config.get('version')) is not int or config['version'] != 1:
+                        self.add('warning', 'hook_config_version', 'Cursor hook configuration requires version 1.', agent=agent, path=str(path))
+                    if config.get('hooks', {}).get('agent-end'):
+                        self.add('warning', 'hook_event_legacy', 'Cursor uses stop. Review the legacy agent-end entries.', agent=agent, path=str(path))
                 event_names = ('agent-end', 'stop') if agent == 'cursor' else ('Stop',)
                 candidates = []
                 for event in event_names:
@@ -253,13 +258,13 @@ class Doctor:
         reference = any(Path(word).name == 'agent-sessions' for word in words) or 'agent_sessions' in words
         for word in words[:2]:
             script = Path(word).expanduser()
-            if script.suffix != '.sh' or not script.is_absolute():
+            if script.suffix not in ('.sh', '.py') or not script.is_absolute():
                 continue
             try:
                 content = script.read_text(encoding='utf-8')
                 reference = reference or 'agent-sessions' in content or 'agent_sessions' in content
             except READ_ERRORS as error:
-                self.add('warning', 'hook_script_unreadable', 'Configured shell script is missing or unreadable.',
+                self.add('warning', 'hook_script_unreadable', 'Configured script is missing or unreadable.',
                          agent=agent, path=str(script), error_type=type(error).__name__)
         return reference
 
