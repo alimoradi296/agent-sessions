@@ -130,6 +130,38 @@ Coverage applies to discovered main transcripts. Child-agent transcript discover
 Date limits use the session start date, or the estimated date for undated Cursor transcripts.
 They do not select individual turns from older sessions resumed within the period.
 
+### Concurrent exports and interrupted writes
+
+Session exports hold one OS lock per output directory while they read and update indexes.
+This protects cooperating local writers from losing each other's index entries.
+Standalone renderer writes use the same lock.
+
+The default wait is 10 seconds per export. Use `--lock-timeout` to change the wait:
+
+```bash
+agent-sessions export codex <session-id> --lock-timeout 20 -o /path/to/private-exports/
+agent-sessions bulk --lock-timeout 20 --coverage -o /path/to/private-exports/
+```
+
+A value of `0` makes one lock attempt without waiting.
+A lock timeout or storage error produces exit code `1` with a diagnostic message.
+Invalid indexes stop the export before it replaces any transcript or index.
+Bulk export stops on a storage error. Earlier successful exports remain available.
+
+The exporter writes and syncs temporary files in the output directory before it replaces any destination.
+It replaces each destination atomically, with `sessions.json` last.
+Coverage reports also use the lock and atomic replacement.
+On POSIX systems, replacement files have owner-only permissions.
+
+Atomic replacement applies to each file separately. It does not create a transaction across all three export files.
+A crash between replacements can leave complete files from different export attempts.
+Run `doctor` after an interrupted export. Then retry the affected export to restore consistency.
+
+The OS releases the lock after process termination.
+The `.agent-sessions.lock` file stays in place. Keep it in place because deleting it can separate competing writers onto different locks.
+A killed process can leave unused `.agent-sessions-*.tmp` files. Exports and indexes do not load these files.
+The concurrency and interruption tests use synthetic data on the local POSIX environment. Windows lock behavior needs separate runtime checks.
+
 ### Check archive health
 
 ```bash

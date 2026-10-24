@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent_sessions.models import Session
+from agent_sessions.models import Agent, Session
+from agent_sessions.storage import StorageError, InvalidIndexError, directory_lock, atomic_write_text, validate_session_id
 
 
 class JsonIndexRenderer:
@@ -46,35 +47,51 @@ class JsonIndexRenderer:
         }
 
     @classmethod
-    def update(cls, session: Session, index_path: Path) -> None:
+    def render_update(cls, session: Session, index_path: Path) -> str:
+        """Prepare an update without writing or discarding invalid entries."""
+        validate_session_id(session.id)
         entries: dict[str, dict] = {}
-
         if index_path.exists():
             try:
                 data = json.loads(index_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    entries = {e["id"]: e for e in data.get("sessions", []) if "id" in e}
+                    rows = data.get("sessions")
+                    if data.get("version", 1) != 1 or not isinstance(rows, list):
+                        raise ValueError("Unsupported index shape or version")
+                    if "count" in data and (type(data["count"]) is not int or data["count"] != len(rows)):
+                        raise ValueError("Inconsistent index count")
                 elif isinstance(data, list):
-                    entries = {e["id"]: e for e in data if isinstance(e, dict) and "id" in e}
-            except (json.JSONDecodeError, KeyError):
-                pass
-
+                    rows = data
+                else:
+                    raise ValueError("Expected an index object or list")
+                for row in rows:
+                    if not isinstance(row, dict):
+                        raise ValueError("Expected an index entry object")
+                    sid = row.get("id")
+                    if not isinstance(sid, str) or not sid or sid in entries:
+                        raise ValueError("Missing or duplicate session ID")
+                    validate_session_id(sid)
+                    if row.get("agent") not in [agent.value for agent in Agent]:
+                        raise ValueError("Unknown agent")
+                    if "file" in row and row["file"] != f"{sid}.md":
+                        raise ValueError("Invalid transcript reference")
+                    for field in ("started_at", "date"):
+                        if row.get(field) is not None and not isinstance(row[field], str):
+                            raise ValueError("Invalid date field")
+                    entries[sid] = row
+            except (ValueError, UnicodeError, OSError, StorageError) as error:
+                raise InvalidIndexError(
+                    f"Cannot update invalid or unreadable JSON index at {index_path}. Run doctor before retrying."
+                ) from error
+        if session.id in entries and entries[session.id]["agent"] != session.agent.value:
+            raise InvalidIndexError("Session ID belongs to another agent. Export to a separate directory.")
         entries[session.id] = cls.session_to_dict(session)
+        sorted_entries = sorted(entries.values(), key=lambda e: e.get("started_at") or e.get("date") or "", reverse=True)
+        return json.dumps({"version": 1, "count": len(sorted_entries), "sessions": sorted_entries},
+                          indent=2, ensure_ascii=False) + "\n"
 
-        sorted_entries = sorted(
-            entries.values(),
-            key=lambda e: e.get("started_at") or e.get("date") or "",
-            reverse=True,
-        )
-
-        output = {
-            "version": 1,
-            "count": len(sorted_entries),
-            "sessions": sorted_entries,
-        }
-
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        index_path.write_text(
-            json.dumps(output, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+    @classmethod
+    def update(cls, session: Session, index_path: Path) -> None:
+        validate_session_id(session.id)
+        with directory_lock(index_path.parent):
+            atomic_write_text(index_path, cls.render_update(session, index_path))

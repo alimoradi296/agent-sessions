@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from agent_sessions.models import Session
+from agent_sessions.storage import InvalidIndexError, directory_lock, atomic_write_text, validate_session_id
 
 HEADER = """\
 # Session Index
@@ -20,7 +22,7 @@ class IndexRenderer:
 
     @classmethod
     def make_entry(cls, session: Session) -> str:
-        summary = (session.summary or session.title)[:160].rstrip()
+        summary = _cell(session.summary or session.title)[:160].rstrip()
         parent = f" ← `{session.parent_id[:8]}…`" if session.parent_id else ""
         msg_count = f"{session.user_message_count}u/{session.assistant_message_count}a"
 
@@ -28,7 +30,7 @@ class IndexRenderer:
             f"| `{session.id[:8]}…` "
             f"| {session.agent.value} "
             f"| {session.date_str}{' (file mtime)' if session.date_source == 'file_mtime' else ''} "
-            f"| `{session.branch}` "
+            f"| `{_cell(session.branch)}` "
             f"| {session.duration_human} "
             f"| {msg_count} "
             f"| {summary}{parent} "
@@ -36,19 +38,40 @@ class IndexRenderer:
         )
 
     @classmethod
-    def update(cls, session: Session, index_path: Path) -> None:
+    def render_update(cls, session: Session, index_path: Path) -> str:
+        validate_session_id(session.id)
         new_entry = cls.make_entry(session)
-        short_id = session.id[:8]
+        if not index_path.exists():
+            return HEADER + new_entry + "\n"
+        try:
+            lines = index_path.read_text(encoding="utf-8").splitlines()
+            sep_idx = next(i for i, line in enumerate(lines) if line.startswith("|---"))
+            if not any(line.startswith("| ID | Agent |") for line in lines[:sep_idx]):
+                raise ValueError("Missing index table header")
+            seen = set()
+            kept = lines[:sep_idx + 1]
+            for line in lines[sep_idx + 1:]:
+                if not line.strip():
+                    continue
+                match = re.search(r"\| \[([\w-]+)\.md\]\(\1\.md\) \|$", line)
+                if not match or not line.startswith("| ") or match[1] in seen:
+                    raise ValueError("Malformed or duplicate index row")
+                seen.add(match[1])
+                if match[1] != session.id:
+                    kept.append(line)
+            kept.insert(sep_idx + 1, new_entry)
+            return "\n".join(kept) + "\n"
+        except (OSError, UnicodeError, ValueError, StopIteration) as error:
+            raise InvalidIndexError(
+                f"Cannot update invalid or unreadable Markdown index at {index_path}. Run doctor before retrying."
+            ) from error
 
-        if index_path.exists():
-            existing = index_path.read_text(encoding="utf-8")
-            lines = [l for l in existing.splitlines() if short_id not in l]
-            try:
-                sep_idx = next(i for i, l in enumerate(lines) if l.startswith("|---"))
-                lines.insert(sep_idx + 1, new_entry)
-                index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            except StopIteration:
-                index_path.write_text(HEADER + new_entry + "\n", encoding="utf-8")
-        else:
-            index_path.parent.mkdir(parents=True, exist_ok=True)
-            index_path.write_text(HEADER + new_entry + "\n", encoding="utf-8")
+    @classmethod
+    def update(cls, session: Session, index_path: Path) -> None:
+        validate_session_id(session.id)
+        with directory_lock(index_path.parent):
+            atomic_write_text(index_path, cls.render_update(session, index_path))
+
+
+def _cell(text: str) -> str:
+    return " ".join(text.split()).replace("|", "&#124;")

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import date
@@ -36,6 +37,10 @@ from agent_sessions.parsers.codex import CodexParser
 from agent_sessions.renderers.index import IndexRenderer
 from agent_sessions.renderers.json_index import JsonIndexRenderer
 from agent_sessions.renderers.markdown import MarkdownRenderer
+from agent_sessions.storage import (
+    DEFAULT_LOCK_TIMEOUT, StorageError, directory_lock, atomic_write_many,
+    atomic_write_text, validate_session_id,
+)
 
 
 def resolve_output_dir(cwd: Optional[str]) -> Path:
@@ -52,7 +57,8 @@ def resolve_output_dir(cwd: Optional[str]) -> Path:
     return fallback
 
 
-def export_session(session: Session, out_dir: Path, dry_run: bool = False) -> None:
+def export_session(session: Session, out_dir: Path, dry_run: bool = False,
+                   lock_timeout: float = DEFAULT_LOCK_TIMEOUT) -> None:
     if dry_run:
         print(f"[dry-run] Would write: {out_dir / f'{session.id}.md'}")
         print(f"  Agent:    {session.agent.value}")
@@ -64,9 +70,17 @@ def export_session(session: Session, out_dir: Path, dry_run: bool = False) -> No
             print(f"  Tokens:   {session.usage.total_tokens:,}")
         return
 
-    md_path = MarkdownRenderer.write(session, out_dir)
-    IndexRenderer.update(session, out_dir / "SESSION_INDEX.md")
-    JsonIndexRenderer.update(session, out_dir / "sessions.json")
+    validate_session_id(session.id)
+    md_path = out_dir / f"{session.id}.md"
+    with directory_lock(out_dir, timeout=lock_timeout):
+        # Validate both existing indexes and prepare every payload before
+        # replacing any destination. JSON is the last commit marker.
+        json_path = out_dir / "sessions.json"
+        md_index_path = out_dir / "SESSION_INDEX.md"
+        json_text = JsonIndexRenderer.render_update(session, json_path)
+        index_text = IndexRenderer.render_update(session, md_index_path)
+        atomic_write_many({md_path: MarkdownRenderer.render(session),
+                           md_index_path: index_text, json_path: json_text})
     print(f"Exported → {md_path}")
 
 
@@ -103,7 +117,7 @@ def cmd_hook(args: argparse.Namespace) -> None:
         return
 
     out_dir = resolve_output_dir(cwd)
-    export_session(session, out_dir)
+    export_session(session, out_dir, lock_timeout=getattr(args, "lock_timeout", DEFAULT_LOCK_TIMEOUT))
 
 
 # ── Export command ──────────────────────────────────────────────────────────
@@ -120,7 +134,8 @@ def cmd_export(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     out_dir = Path(args.output) if args.output else resolve_output_dir(args.cwd)
-    export_session(session, out_dir, dry_run=args.dry_run)
+    export_session(session, out_dir, dry_run=args.dry_run,
+                   lock_timeout=getattr(args, "lock_timeout", DEFAULT_LOCK_TIMEOUT))
 
 
 # ── Bulk command ────────────────────────────────────────────────────────────
@@ -169,7 +184,8 @@ def cmd_bulk(args: argparse.Namespace) -> None:
                         or (until and session.date_str >= until)):
                     status = "outside_period"
                 if status == "exported":
-                    export_session(session, out_dir, dry_run=args.dry_run)
+                    export_session(session, out_dir, dry_run=args.dry_run,
+                                   lock_timeout=getattr(args, "lock_timeout", DEFAULT_LOCK_TIMEOUT))
                     total += 1
             coverage.extend({
                 "agent": agent_name, "source_path": str(path), "status": status,
@@ -179,11 +195,12 @@ def cmd_bulk(args: argparse.Namespace) -> None:
             } for path in group)
 
     if getattr(args, "coverage", False) and not args.dry_run:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "coverage.json").write_text(json.dumps({
+        coverage_text = json.dumps({
             "version": 1, "source_files": len(coverage),
             "exported_sessions": total, "sources": coverage,
-        }, indent=2) + "\n", encoding="utf-8")
+        }, indent=2) + "\n"
+        with directory_lock(out_dir, timeout=getattr(args, "lock_timeout", DEFAULT_LOCK_TIMEOUT)):
+            atomic_write_text(out_dir / "coverage.json", coverage_text)
 
     print(f"\nExported {total} sessions to {out_dir}")
     errors = sum(row["status"] == "error" for row in coverage)
@@ -609,6 +626,16 @@ def iso_date(value: str) -> str:
         raise argparse.ArgumentTypeError("Use a date in YYYY-MM-DD format")
 
 
+def lock_timeout(value: str) -> float:
+    try:
+        result = float(value)
+        if not math.isfinite(result) or result < 0:
+            raise ValueError
+        return result
+    except ValueError:
+        raise argparse.ArgumentTypeError("Use a finite, nonnegative number of seconds")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="agent-sessions",
@@ -619,6 +646,7 @@ def main() -> None:
     # hook (stdin-driven, used by Stop hooks)
     p_hook = sub.add_parser("hook", help="Hook entry point (reads JSON from stdin)")
     p_hook.add_argument("--agent", choices=list(PARSERS.keys()), default="claude", help="Which agent (default: claude)")
+    p_hook.add_argument("--lock-timeout", type=lock_timeout, default=DEFAULT_LOCK_TIMEOUT, help="Seconds to wait for the export lock (default: 10)")
 
     # export
     p_export = sub.add_parser("export", help="Export a single session")
@@ -627,6 +655,7 @@ def main() -> None:
     p_export.add_argument("-o", "--output", help="Output directory")
     p_export.add_argument("--cwd", help="Project working directory (for auto-detection)")
     p_export.add_argument("--dry-run", action="store_true", help="Show what would be exported")
+    p_export.add_argument("--lock-timeout", type=lock_timeout, default=DEFAULT_LOCK_TIMEOUT, help="Seconds to wait for the export lock (default: 10)")
 
     # bulk
     p_bulk = sub.add_parser("bulk", help="Export all sessions")
@@ -638,6 +667,7 @@ def main() -> None:
     p_bulk.add_argument("--since", type=iso_date, help="Session date on/after YYYY-MM-DD")
     p_bulk.add_argument("--until", type=iso_date, help="Session date before YYYY-MM-DD (exclusive)")
     p_bulk.add_argument("--coverage", action="store_true", help="Write local coverage.json with source file statuses")
+    p_bulk.add_argument("--lock-timeout", type=lock_timeout, default=DEFAULT_LOCK_TIMEOUT, help="Seconds to wait for each export lock (default: 10)")
 
     # search
     p_search = sub.add_parser("search", help="Search exported sessions")
@@ -702,32 +732,19 @@ def main() -> None:
     if args.command == "bulk" and args.since and args.until and args.since >= args.until:
         parser.error("--until must be after --since")
 
-    if args.command == "hook":
-        cmd_hook(args)
-    elif args.command == "export":
-        cmd_export(args)
-    elif args.command == "bulk":
-        cmd_bulk(args)
-    elif args.command == "search":
-        cmd_search(args)
-    elif args.command == "stats":
-        cmd_stats(args)
-    elif args.command == "distill":
-        cmd_distill(args)
-    elif args.command == "link":
-        cmd_link(args)
-    elif args.command == "to-obsidian":
-        cmd_to_obsidian(args)
-    elif args.command == "report":
-        cmd_report(args)
-    elif args.command == "context":
-        cmd_context(args)
-    elif args.command == "doctor":
-        cmd_doctor(args)
-    elif args.command == "install":
-        cmd_install(args)
-    else:
+    commands = {
+        "hook": cmd_hook, "export": cmd_export, "bulk": cmd_bulk,
+        "search": cmd_search, "stats": cmd_stats, "distill": cmd_distill,
+        "link": cmd_link, "to-obsidian": cmd_to_obsidian, "report": cmd_report,
+        "context": cmd_context, "doctor": cmd_doctor, "install": cmd_install,
+    }
+    if args.command not in commands:
         parser.print_help()
+        return
+    try:
+        commands[args.command](args)
+    except StorageError as error:
+        parser.exit(1, f"agent-sessions: {error}\n")
 
 
 if __name__ == "__main__":

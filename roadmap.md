@@ -23,6 +23,7 @@ Private transcripts, exports, reports, and context packs stay outside the reposi
 | Session links, reports, and Obsidian export | Implemented |
 | Hook installers | Implemented, runtime compatibility needs separate checks |
 | Read-only archive diagnostics | Implemented with `doctor`, hook execution remains unverified |
+| Concurrent export protection | Implemented with directory locks and atomic replacement per file |
 
 An implemented feature is not a guarantee of compatibility with every agent version.
 
@@ -46,13 +47,18 @@ An implemented feature is not a guarantee of compatibility with every agent vers
 - [x] Add read-only `doctor` checks for source discovery, hook configuration, stale exports, and index consistency.
 - [x] Add text and JSON diagnostic reports with exit codes for warnings and errors.
 - [x] Check synthetic fixtures for read-only behavior and hook non-execution.
+- [x] Lock each output directory during session export and standalone renderer updates.
+- [x] Stage and sync all session export files before atomic replacement, with the JSON index last.
+- [x] Fail on invalid indexes and lock timeouts without silently discarding existing entries.
+- [x] Match Markdown index entries by full session ID and keep each new row on one line.
+- [x] Test concurrent processes, write failures, and process termination with synthetic fixtures.
 
 ### Remaining
 
 - [ ] Add a scheduled reconciliation command or documented cron/systemd setup.
 - [ ] Check hook behavior against supported agent releases.
 - [ ] Define support for child-agent transcripts and their parent relationships.
-- [ ] Add atomic index updates and concurrent export protection.
+- [ ] Check locking and interrupted writes on Windows.
 - [ ] Surface malformed records and unsupported event types in coverage reports.
 
 ### Acceptance criteria
@@ -62,6 +68,11 @@ An implemented feature is not a guarantee of compatibility with every agent vers
 - Tool calls retain their arguments, results, and correlation IDs.
 - Estimated dates remain visible in exported metadata and reports.
 - Tests run without access to developer home directories or private transcripts.
+- Concurrent local exports preserve every session entry in both indexes.
+- Individual export files remain complete after interruption. A retry restores consistency across files.
+
+Atomic replacement is per file. A crash can leave the transcript and indexes from different export attempts.
+`doctor` can detect inconsistencies. Automatic recovery and scheduled reconciliation remain open work.
 
 ## Phase 4 — More accurate extraction
 
@@ -162,7 +173,7 @@ agent-sessions context "example cache" --last 5 \
 ## Execution order
 
 1. Complete ingestion checks and generate a private coverage manifest.
-2. Use `doctor` to inspect private exports. Add atomic writes and scheduled reconciliation.
+2. Use `doctor` to inspect private exports. Add scheduled reconciliation after the local export protections.
 3. Evaluate the Context Bridge prototype with a real local handoff.
 4. Improve extraction and evidence references.
 5. Add workflow links, semantic search, analytics, and Obsidian synchronization as needed.

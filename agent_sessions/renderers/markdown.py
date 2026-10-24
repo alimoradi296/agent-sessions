@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_sessions.models import Session
+from agent_sessions.storage import directory_lock, atomic_write_text, validate_session_id
 
 
 class MarkdownRenderer:
@@ -89,9 +90,10 @@ class MarkdownRenderer:
 
     @classmethod
     def write(cls, session: Session, out_dir: Path) -> Path:
-        out_dir.mkdir(parents=True, exist_ok=True)
+        validate_session_id(session.id)
         path = out_dir / f"{session.id}.md"
-        path.write_text(cls.render(session), encoding="utf-8")
+        with directory_lock(out_dir):
+            atomic_write_text(path, cls.render(session))
         return path
 
 
