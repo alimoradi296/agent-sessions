@@ -53,7 +53,7 @@ def _rank_sections(sections: list[tuple[str, str]], needle: str) -> dict[int, tu
                 if sections[k][0] == 'User':
                     break
                 answer = sections[k][1].casefold()
-                if any(word in answer for word in ('correct', 'instead', 'supersed', 'clarif', 'deliverable', 'scope')):
+                if any(word in answer for word in ('correct', 'instead', 'supersed', 'conflict', 'clarif', 'deliverable', 'scope')):
                     offer(j, 12, 'nearby follow-up request; relevance unverified')
                     offer(k, 25, 'nearby clarification; relevance unverified')
     return ranked

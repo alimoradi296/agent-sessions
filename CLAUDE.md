@@ -34,6 +34,7 @@ agent_sessions/
     doctor.py         — read-only archive and hook diagnostics
     context.py        — shared source selection and cited conversation excerpts
     handoff.py        — structured claim groups with evidence excerpts
+    relations.py      — explicit quoted relationship candidates and source references
     transcript.py     — conversation prose filtering
 v1/                   — original naive implementation (preserved for history)
 v2/                   — claude-only smart implementation (preserved for history)

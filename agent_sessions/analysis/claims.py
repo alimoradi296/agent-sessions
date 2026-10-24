@@ -83,13 +83,17 @@ def claims_from_session(session: Session) -> list[dict]:
     return claims
 
 
+def section_evidence(path: Path, index: int, role: str, agent: str) -> dict:
+    """Locate a cleaned export section without inventing raw transcript lines."""
+    return dict(session_id=path.stem, agent=agent, role=role.lower(), source='export_section',
+                conversation_section=index, source_path=str(path.resolve()), source_line=None)
+
+
 def claims_from_sections(path: Path, sections: list[tuple[int, str, str]], agent: str) -> list[dict]:
     """Extract complete sections, retaining their original one-based coordinates."""
     claims = []
     for i, role, text in sections:
-        claims.extend(_from_text(text, role.lower(), dict(
-            session_id=path.stem, agent=agent, source='export_section',
-            conversation_section=i, source_path=str(path.resolve()), source_line=None)))
+        claims.extend(_from_text(text, role.lower(), section_evidence(path, i, role, agent)))
     return claims
 
 
@@ -98,9 +102,8 @@ def claims_from_markdown(path: Path, content: str, agent: str) -> list[dict]:
     return claims_from_sections(path, sections, agent)
 
 
-def render_claim(claim: dict) -> str:
-    """Render an evidence locator without claiming that it proves the result."""
-    evidence = claim['evidence']
+def render_evidence(evidence: dict) -> str:
+    """Render a source coordinate, not independent verification."""
     coordinate = (f"message {evidence['message_index']}" if evidence['source'] == 'transcript_message'
                   else f"conversation section {evidence['conversation_section']}")
     if evidence.get('source_line') is not None:
@@ -109,6 +112,12 @@ def render_claim(claim: dict) -> str:
     if source_path:
         # Keep paths literal. They are local references, not trusted URLs.
         coordinate += f" in {json.dumps(source_path, ensure_ascii=False)}"
+    if evidence.get('section_line') is not None:
+        coordinate += f", cleaned section line {evidence['section_line']}"
+    return f"Source: {evidence['agent']} / {evidence['session_id']} / {evidence['role']} / {coordinate}."
+
+
+def render_claim(claim: dict) -> str:
+    """Render an evidence locator without claiming that it proves the result."""
     text = ' '.join(claim['text'].splitlines())
-    return (f"- **{claim['kind']}** (not checked): {text}\n"
-            f"  Source: {evidence['agent']} / {evidence['session_id']} / {evidence['role']} / {coordinate}.")
+    return f"- **{claim['kind']}** (not checked): {text}\n  {render_evidence(claim['evidence'])}"

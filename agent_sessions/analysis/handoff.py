@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent_sessions.analysis.claims import claims_from_sections, render_claim
+from agent_sessions.analysis.claims import claims_from_sections, render_claim, section_evidence
+from agent_sessions.analysis.relations import find_relations, render_relations
 from agent_sessions.analysis.context import DEFAULT_MAX_CHARS, MAX_SECTIONS, render_sources, select_sources
 
 GROUPS = [
@@ -27,6 +28,7 @@ def build_handoff(directory: Path, query: str, last: int = 5,
                   max_chars: int = DEFAULT_MAX_CHARS) -> str:
     sources = select_sources(directory, query, last, max_chars)
     claims = []
+    relation_sections = []
     shortened = 0
     complete = 0
     for source in sources:
@@ -36,7 +38,10 @@ def build_handoff(directory: Path, query: str, last: int = 5,
                 # Never classify joined fragments as if they were an exact quote.
                 shortened += 1
                 continue
-            sections.append((i + 1, source.sections[i][0], text))
+            role = source.sections[i][0]
+            sections.append((i + 1, role, text))
+            evidence = section_evidence(source.path, i + 1, role, source.metadata.get('agent', 'unknown'))
+            relation_sections.append((evidence, text))
         complete += len(sections)
         claims.extend(claims_from_sections(source.path, sections, source.metadata.get('agent', 'unknown')))
 
@@ -67,10 +72,9 @@ def build_handoff(directory: Path, query: str, last: int = 5,
 
     lines.extend(['## Checked results', '',
                   'None independently checked by this command. Verification requires separate evidence review.', '',
-                  '## Conflicts and supersession', '',
-                  'Not resolved by this command. Differing statements remain attributed to their speakers.',
-                  'Local section order and Cursor file modification dates do not establish authority across sessions.', '',
-                  '## Evidence excerpts', '',
+                  '## Conflicts and supersession', ''])
+    lines.extend(render_relations(find_relations(relation_sections)))
+    lines.extend(['## Evidence excerpts', '',
                   'Section numbers count cleaned conversation sections in each linked export.', ''])
     lines.extend(render_sources(sources, heading_level=3))
     return '\n'.join(lines) + '\n'

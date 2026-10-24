@@ -31,7 +31,7 @@ Summary claims repeat selected evidence text, so the excerpt budget does not lim
 | Other proposals | Recognized suggestions and intentions |
 | Open questions and reported bugs | Recognized questions, bugs, and causes |
 | Checked results | Explicitly empty because the command performs no independent evidence review |
-| Conflicts and supersession | Explicitly unresolved, with differing statements preserved in their sources |
+| Conflicts and supersession | Explicit quoted relationship candidates, source matches, and unresolved authority |
 
 The rules recognize a limited set of English wording. They can miss implicit statements, other phrasing, and other languages.
 “Not established” means that the selected complete excerpts did not supply a recognized claim for that group.
@@ -51,7 +51,48 @@ The command does not load distilled JSON to invent checked results or use claims
 
 “Verified” in a conversation remains a reported result. A claim about deployment is not a deployed-revision check.
 Conflicting decisions remain attributed to their speakers. Ordering by date does not select a winner.
-Independent verification and explicit correction relationships remain separate roadmap work.
+Independent verification and broader relationship detection remain separate roadmap work.
+
+## Explicit relationship candidates
+
+The handoff recognizes these English forms in selected complete excerpts:
+
+```text
+Correction: Replace "Keep the example cache local." with "Use the example queue instead.".
+"Use the example queue instead." supersedes "Keep the example cache local.".
+"Use the example queue instead." corrects "Keep the example cache local.".
+Conflict: "Keep the example cache local." conflicts with "Use the example queue instead.".
+```
+
+The replacement form produces `proposed_correction`. The other forms produce reported relationships.
+These labels describe what a speaker proposed or reported. They do not establish adoption, agreement, truth, or current authority.
+A proposal to replace a statement never deletes or changes the original claim.
+
+Quotes must contain at least eight characters. Matching is exact and case-sensitive.
+The parser accepts straight quotes, paired curly quotes, and single backticks.
+It skips short quotes, questions, identical endpoints, multiple quoted alternatives, and unsupported framing.
+Unrecognized wording remains visible in the evidence excerpts.
+
+Each candidate cites its full relationship quote and its speaker, export, conversation section, and cleaned section line.
+Each target reference retains its complete context line. Qualifications and negation remain visible.
+Cleaned section lines are not raw transcript or file line numbers.
+A substring match locates a reference. It does not establish semantic agreement with the quoted statement.
+
+| Status | Meaning |
+|---|---|
+| `linked` | Each required reference has one matching source line in selected evidence. This is not verification. |
+| `ambiguous` | More than one matching source line exists. Every match remains attributed. |
+| `unresolved` | A required reference is absent from selected evidence. It can exist elsewhere. |
+
+For correction and supersession, the replacement statement is quoted in the relationship witness itself.
+The original statement requires a reference outside recognized relationship lines.
+For conflicts, both references must occur outside those lines.
+Repeated relationship quotes cannot supply each other's missing originals.
+Copied statements across agents remain separate matches. Dates never choose a winner.
+Omitted and shortened sections do not supply relationship evidence.
+
+Relationship summaries repeat source text beyond the excerpt character budget.
+The command performs no semantic conflict detection. It cannot resolve unquoted corrections or decide which speaker has authority.
 
 ## Review before resuming
 

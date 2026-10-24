@@ -137,14 +137,16 @@ agent-sessions context "example cache" --last 5 \
 - [x] Add an optional structured handoff with cited historical requests, decision candidates, reported blockers, results, and next actions.
 - [x] Preserve unclassified source excerpts and exclude shortened fragments from claim classification.
 - [x] Keep checked results explicitly unestablished until independent verification exists.
+- [x] Link explicit quoted corrections, supersession, and conflicts to matching selected evidence.
+- [x] Preserve missing and ambiguous references without choosing authority from dates.
 
 Ranking uses literal matches and English clarification cues. Structured fields use English extraction rules.
-Neither format resolves conflicts or establishes verified decisions.
+Relationship links locate explicit quoted references. Neither format resolves conflicts or establishes verified decisions.
 Independent fresh-session evaluation remains open.
 
 ### Context Bridge remaining
 
-- [ ] Connect conflicting or superseded decisions with their evidence.
+- [ ] Broaden relationship extraction beyond explicit English quoted statements.
 - [ ] Evaluate a handoff in a fresh session before claiming that it prevents repeated explanations.
 - [ ] Add optional target formats after checking actual integration requirements.
 

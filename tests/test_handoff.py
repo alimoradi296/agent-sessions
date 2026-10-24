@@ -132,6 +132,44 @@ class HandoffTests(unittest.TestCase):
             self.assertNotIn(marker, pack)
         self.assertIn('missing synthetic approval', self.group(pack, 'Reported blockers'))
 
+    def test_explicit_correction_keeps_both_statements_and_relationship_evidence(self):
+        self.export('synthetic-linked', [
+            Message(role='user', text='Please review TASK-042.'),
+            Message(role='assistant', text='TASK-042\nDecision: Keep the example cache local.'),
+            Message(role='user', text='Clarify the earlier recommendation.'),
+            Message(role='assistant', text='Correction: Replace "Keep the example cache local." '
+                    'with "Use the example queue instead.".'),
+        ])
+        pack = build_handoff(self.directory, 'TASK-042')
+        group = self.group(pack, 'Conflicts and supersession')
+        self.assertIn('proposed_correction — linked (not checked)', group)
+        self.assertIn('conversation section 2', group)
+        self.assertIn('conversation section 4', group)
+        self.assertIn('Keep the example cache local.', self.group(pack, 'Decision candidates'))
+        self.assertIn('Use the example queue instead.', group)
+        self.assertIn('does not establish adoption or correctness', group)
+        self.assertIn('None independently checked', self.group(pack, 'Checked results'))
+
+    def test_relationships_never_search_budget_omitted_sections(self):
+        self.export('synthetic-omitted', [
+            Message(role='assistant', text='TASK-042\nKeep the example cache local.\n' + 'Long evidence. ' * 100),
+            Message(role='assistant', text='TASK-042\nReplace "Keep the example cache local." '
+                    'with "Use the example queue instead.".'),
+        ])
+        pack = build_handoff(self.directory, 'TASK-042', max_chars=400)
+        group = self.group(pack, 'Conflicts and supersession')
+        self.assertIn('proposed_correction — unresolved (not checked)', group)
+        self.assertIn('Original reference not found', group)
+        self.assertIn('Relevant candidate sections omitted by limits: 1.', pack)
+
+    def test_shortened_relationship_fragments_are_not_linked(self):
+        self.export('synthetic-shortened', [Message(role='assistant', text=
+            'TASK-042\nReplace "Keep the example cache local." with "Use the example queue instead.".\n'
+            + 'Long evidence. ' * 100)])
+        pack = build_handoff(self.directory, 'TASK-042', max_chars=180)
+        self.assertIn('shortened section(s) are not classified', pack)
+        self.assertIn('No explicit quoted relationships recognized', self.group(pack, 'Conflicts and supersession'))
+
     def test_read_only_generation_and_private_cli_output(self):
         self.export('synthetic-private', [Message(role='assistant', text='TASK-042\nNext step: review the synthetic evidence.')])
         before = {p.name: (p.stat().st_mtime_ns, p.read_bytes()) for p in self.directory.iterdir() if p.is_file()}

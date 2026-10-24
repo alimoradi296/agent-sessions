@@ -430,7 +430,9 @@ The handoff uses complete selected excerpts directly. It does not require a prev
 Unclassified wording remains in the evidence appendix.
 
 The checked-results section stays empty because this command does not perform independent verification.
-Conflicts remain unresolved, and historical requests do not authorize current actions.
+Explicit quoted corrections, supersession, and conflicts include relationship evidence and matching source references.
+Missing references remain unresolved. Multiple matching source lines remain ambiguous.
+Links do not establish adoption or authority. Conflicts remain unresolved, and historical requests do not authorize current actions.
 Missing fields mean not established in selected excerpts. They do not establish that no blockers or actions exist.
 Shortened excerpts remain visible but do not feed classification.
 Summary claims repeat source text beyond the excerpt character budget.
