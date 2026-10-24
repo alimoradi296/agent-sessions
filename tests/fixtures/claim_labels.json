@@ -404,5 +404,205 @@
     "role": "assistant",
     "text": "Blocker: no blockers.",
     "expected": []
+  },
+  {
+    "name": "deployment branch is not an action",
+    "role": "user",
+    "text": "deploy/preview",
+    "expected": []
+  },
+  {
+    "name": "review file path is not an action",
+    "role": "user",
+    "text": "review/example.md",
+    "expected": []
+  },
+  {
+    "name": "action-like filename is not an action",
+    "role": "user",
+    "text": "run.py",
+    "expected": []
+  },
+  {
+    "name": "hyphenated identifier is not an action",
+    "role": "user",
+    "text": "test-results",
+    "expected": []
+  },
+  {
+    "name": "underscore identifier is not an action",
+    "role": "user",
+    "text": "test_results",
+    "expected": []
+  },
+  {
+    "name": "bare prohibition heading",
+    "role": "user",
+    "text": "Do not",
+    "expected": []
+  },
+  {
+    "name": "bold prohibition heading",
+    "role": "user",
+    "text": "**Do not**",
+    "expected": []
+  },
+  {
+    "name": "markdown action heading",
+    "role": "user",
+    "text": "## Review the synthetic draft",
+    "expected": []
+  },
+  {
+    "name": "bare action heading",
+    "role": "user",
+    "text": "Deploy",
+    "expected": []
+  },
+  {
+    "name": "action heading with colon",
+    "role": "user",
+    "text": "Review:",
+    "expected": []
+  },
+  {
+    "name": "negative existence description",
+    "role": "user",
+    "text": "do not exist today.",
+    "expected": []
+  },
+  {
+    "name": "negative containment description",
+    "role": "user",
+    "text": "do not contain any synthetic records.",
+    "expected": []
+  },
+  {
+    "name": "negative state description",
+    "role": "user",
+    "text": "do not represent completed work.",
+    "expected": []
+  },
+  {
+    "name": "descriptive test subject",
+    "role": "user",
+    "text": "Test results are incomplete.",
+    "expected": []
+  },
+  {
+    "name": "descriptive review subject",
+    "role": "user",
+    "text": "Review notes remain unfinished.",
+    "expected": []
+  },
+  {
+    "name": "bare polite prefix",
+    "role": "user",
+    "text": "Please",
+    "expected": []
+  },
+  {
+    "name": "bare question prefix",
+    "role": "user",
+    "text": "Can you",
+    "expected": []
+  },
+  {
+    "name": "polite branch token is not an action",
+    "role": "user",
+    "text": "Please deploy/preview",
+    "expected": []
+  },
+  {
+    "name": "negative publish request survives",
+    "role": "user",
+    "text": "Do not publish the synthetic draft.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "negative use request survives",
+    "role": "user",
+    "text": "Do not use the example credential.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "short negative request survives",
+    "role": "user",
+    "text": "Do not deploy.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "review actual results is a request",
+    "role": "user",
+    "text": "Review results from the synthetic suite.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "run action with target survives",
+    "role": "user",
+    "text": "Run the synthetic checks.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "deployment action with target survives",
+    "role": "user",
+    "text": "Deploy the example build to preview.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "polite short action survives",
+    "role": "user",
+    "text": "Please continue.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "spaced colon heading",
+    "role": "user",
+    "text": "Review :",
+    "expected": []
+  },
+  {
+    "name": "polite request with another verb",
+    "role": "user",
+    "text": "Please fill the synthetic template.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "explicit question with another verb",
+    "role": "user",
+    "text": "Can you assess the synthetic example?",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "polite negative request survives",
+    "role": "user",
+    "text": "Please do not publish the synthetic draft.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "noun heading does not become bare request",
+    "role": "user",
+    "text": "Use of synthetic queues",
+    "expected": []
   }
 ]

@@ -17,7 +17,7 @@ New distilled files use `distill_version: 3` and include a `claims` array.
 | `deferred` | A speaker identifies work as deferred or outside scope. |
 | `open_question` | A speaker asks a recognized unresolved question. |
 
-Each claim has `verification: "not_checked"` and `method: "english_rules_v2"`.
+Each claim has `verification: "not_checked"` and `method: "english_rules_v3"`.
 `checked_result` is reserved for a future independent evidence-review workflow. The extractor never emits it.
 A statement such as “Verified: tests passed” remains a reported result.
 Reading a test definition does not establish a passing test run. A reported local test does not establish production behavior.
@@ -30,7 +30,7 @@ This synthetic example shows a result reported in a source transcript:
 {
   "kind": "reported_result",
   "text": "Tests passed for the example module.",
-  "method": "english_rules_v2",
+  "method": "english_rules_v3",
   "verification": "not_checked",
   "evidence": {
     "session_id": "synthetic-example",
@@ -63,7 +63,10 @@ Reports summarize at most eight claims per session and sixteen overall. The JSON
 ## Limits and compatibility
 
 Classification uses explicit patterns, such as “Please implement”, “Proposal:”, “Decision:”, and “Tests passed”.
-It can miss implicit decisions, unfamiliar phrasing, multiline claims, and languages other than English.
+Request recognition rejects action-like paths such as `deploy/preview`, bare headings such as “Do not”, and descriptive negatives such as “do not exist”.
+Bare action verbs require a target. Polite requests and recognized prohibitions can be complete without one.
+Markdown action headings do not become requests. Common subject statements, such as “Test results are incomplete”, also remain unclassified.
+This remains an English heuristic. It can miss unfamiliar actions, implicit decisions, multiline claims, and languages other than English.
 A label describes the speaker's statement. It does not establish agreement, truth, or a later correction's authority.
 Historical requests do not authorize actions in a new session.
 
@@ -79,7 +82,8 @@ Distilled files use atomic replacement and owner-only file permissions on POSIX 
 ## Synthetic evaluation
 
 The labeled cases in `tests/fixtures/claim_labels.json` contain invented conversations.
-Version 2 of the rules adds explicit blocker and next-action labels. Existing version 1 claims remain readable.
+Version 2 added explicit blocker and next-action labels.
+Version 3 tightens request recognition. Existing version 1 and 2 claims remain readable.
 They include positive examples, requests, hypothetical results, undecided wording, excluded content, and language abstention.
 These cases establish regression behavior for the current rules. They do not measure general extraction accuracy.
 

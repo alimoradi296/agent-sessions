@@ -380,6 +380,7 @@ Version 3 adds the `claims` field. Older distilled files still load, without inv
 Re-run `distill` to produce cited claims from available sources or exports.
 Reports and Obsidian notes show claim types and source references.
 The extraction rules recognize a limited set of English patterns and can miss other wording or languages.
+Request rules reject action-like paths, bare action headings, and common descriptive negatives. Source excerpts remain available for review.
 The labeled synthetic cases test these rules. They do not establish accuracy on arbitrary transcripts.
 
 Tool payloads, code blocks, quoted text, and common instruction blocks do not feed claim extraction.

@@ -170,6 +170,20 @@ class HandoffTests(unittest.TestCase):
         self.assertIn('shortened section(s) are not classified', pack)
         self.assertIn('No explicit quoted relationships recognized', self.group(pack, 'Conflicts and supersession'))
 
+    def test_request_group_rejects_paths_and_wrapped_descriptions_but_keeps_evidence(self):
+        self.export('synthetic-request-precision', [Message(role='user', text=
+            'TASK-042\ndeploy/preview\nDo not\nSynthetic exceptions\ndo not exist today.\n'
+            'Do not publish the synthetic draft.\nPlease review the synthetic example.')])
+        pack = build_handoff(self.directory, 'TASK-042')
+        requests = self.group(pack, 'Historical requests and scope')
+        for text in ('deploy/preview', 'do not exist today.', '(not checked): Do not\n'):
+            self.assertNotIn(text, requests)
+        self.assertIn('Do not publish the synthetic draft.', requests)
+        self.assertIn('Please review the synthetic example.', requests)
+        excerpts = self.group(pack, 'Evidence excerpts')
+        self.assertIn('deploy/preview', excerpts)
+        self.assertIn('do not exist today.', excerpts)
+
     def test_read_only_generation_and_private_cli_output(self):
         self.export('synthetic-private', [Message(role='assistant', text='TASK-042\nNext step: review the synthetic evidence.')])
         before = {p.name: (p.stat().st_mtime_ns, p.read_bytes()) for p in self.directory.iterdir() if p.is_file()}

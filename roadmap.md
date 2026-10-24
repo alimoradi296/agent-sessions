@@ -94,6 +94,7 @@ Invalid or missing archive indexes require explicit restoration. Scheduling rema
 - [x] Separate requests, proposals, decision candidates, reported results, bug reports, deferred work, and open questions.
 - [x] Keep transcript claims marked as not checked, including statements that use verification words.
 - [x] Infer outcomes from reported-result claims rather than requests, titles, or proposals.
+- [x] Add request-regression guards for action-like paths, incomplete headings, and descriptive negative phrases.
 - [x] Evaluate English extraction rules with manually labeled synthetic positive and negative cases.
 - [x] Show claim references in reports and Obsidian notes. Load older distilled files without inventing citations.
 

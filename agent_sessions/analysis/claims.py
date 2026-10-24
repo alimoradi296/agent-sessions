@@ -15,7 +15,7 @@ from pathlib import Path
 from agent_sessions.analysis.transcript import clean_knowledge_text, conversation_sections
 from agent_sessions.models import Session
 
-METHOD = 'english_rules_v2'
+METHOD = 'english_rules_v3'
 RULES = [
     ('reported_blocker', r"^(?:blocker|blocked(?: by)?|waiting for)\s*:"),
     ('next_action', r"^next (?:action|step)(?:s)?\s*:"),
@@ -27,17 +27,54 @@ RULES = [
     ('reported_result', r"^(?:(?:reported|checked) result|result|verified)\s*:|^(?:I|we)\s+(?:ran|tested|verified|checked|implemented|fixed|merged|deployed|reviewed|confirmed|completed)\b|^(?:tests?|checks?|build|CI)\s+(?:passed|failed)\b|^(?:implemented|fixed|merged|deployed|resolved|completed)\b"),
 ]
 RULES = [(kind, re.compile(pattern, re.IGNORECASE)) for kind, pattern in RULES]
-REQUEST = re.compile(
-    r"^(?:please\b|(?:can|could|would) you\b|I (?:want|need) you to\b|we need to\b|do not\b|"
-    r"(?:implement|fix|add|remove|write|review|check|test|verify|run|deploy|merge|update|create)\b)", re.IGNORECASE)
+REQUEST_PREFIX = re.compile(
+    r"^(?:(?:please|(?:can|could|would) you|I (?:want|need) you to|we need to)|(?P<negative>do not))\s+",
+    re.IGNORECASE,
+)
+NEGATED_ACTION = re.compile(
+    r"^(?:implement|fix|add|remove|write|review|check|test|verify|run|deploy|merge|update|create|"
+    r"publish|post|edit|delete|change|open|copy|use|treat|assume|claim|read|inspect|explain|help|"
+    r"decide|keep|preserve|accept|approve|commit|push|execute|stop|continue|proceed|wait)"
+    r"(?=\s|[.!?]?$)", re.IGNORECASE,
+)
+BARE_ACTION = re.compile(
+    r"^(?:implement|fix|add|remove|write|review|check|test|verify|run|deploy|merge|update|create)"
+    r"(?=\s|[.!?]?$)", re.IGNORECASE,
+)
+DESCRIPTIVE_SUBJECT = re.compile(
+    r"^(?:results?|reports?|coverage|status|summary|notes?|instructions?|details?|logs?|output|counts?)"
+    r"\s+(?:is|are|was|were|do|does|has|have|remain|remains|show|shows)\b", re.IGNORECASE,
+)
 UNDECIDED = re.compile(r"\b(?:not decided|no decision|decision (?:is )?(?:pending|not made))\b", re.IGNORECASE)
+
+
+def _is_request(text: str) -> bool:
+    """Reject paths, empty headings, and negative descriptions as requests."""
+    prefix = REQUEST_PREFIX.match(text)
+    action_text = text[prefix.end():] if prefix else text
+    if prefix is None:
+        action = BARE_ACTION.match(action_text)
+    elif prefix.group('negative'):
+        action = NEGATED_ACTION.match(action_text)
+    else:
+        # Preserve explicit polite requests with unfamiliar English verbs.
+        action = re.match(r"^[a-z]+(?=\s|[.!?]?$)", action_text, re.IGNORECASE)
+    if action is None:
+        return False
+    target = action_text[action.end():].strip().rstrip('.!?').strip()
+    if (target and not any(char.isalnum() for char in target)) or DESCRIPTIVE_SUBJECT.match(target):
+        return False
+    # Polite and negative instructions can be complete without an object.
+    # Bare action words alone are ambiguous headings, so abstain.
+    return prefix is not None or bool(target)
 
 
 def classify(text: str, role: str) -> str | None:
     """Return one candidate label or abstain; a question is never a result."""
     normalized = re.sub(r'^\s*(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+)', '', text).strip()
     normalized = normalized.replace('**', '').replace('__', '')
-    if role == 'user' and REQUEST.search(normalized):
+    heading = re.match(r'^\s*#{1,6}\s+', text) is not None
+    if role == 'user' and not heading and _is_request(normalized):
         return 'request'
     if UNDECIDED.search(normalized):
         return None

@@ -35,6 +35,19 @@ class ClaimTests(unittest.TestCase):
                     self.assertIn(claim['evidence']['quote'], case['text'])
                     self.assertEqual(claim['evidence']['role'], case['role'])
 
+    def test_wrapped_descriptions_are_not_requests_in_raw_or_export_fallback(self):
+        text = ('deploy/preview\nDo not\nSynthetic exceptions\ndo not exist today.\n'
+                'Do not publish the synthetic draft.\nPlease fill the synthetic template.')
+        session = self.session([Message(role='user', text=text)])
+        direct = Distiller.distill(session)
+        expected = ['Do not publish the synthetic draft.', 'Please fill the synthetic template.']
+        self.assertEqual([c['text'] for c in direct.claims if c['kind'] == 'request'], expected)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = MarkdownRenderer.write(session, Path(tmp))
+            fallback = Distiller.distill_from_markdown(path, {'agent': 'codex'})
+        self.assertEqual([c['text'] for c in fallback.claims if c['kind'] == 'request'], expected)
+        self.assertTrue(all(c['text'] == c['evidence']['quote'] for c in direct.claims + fallback.claims))
+
     def test_references_preserve_raw_message_index_line_speaker_and_quote(self):
         session = self.session([
             Message(role='tool', text='Tests passed in an ignored tool result.'),
