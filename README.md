@@ -378,10 +378,31 @@ agent-sessions context "example cache" --last 5 \
 ```
 
 This command searches conversation text with a literal query across agents.
-The pack includes each matching session's latest request and response, date provenance, and a link to the local export.
-The excerpts exclude tool payloads and marked commentary. The pack labels historical claims as unverified.
-It does not call an LLM or change agent configuration.
-The latest response can omit relevant earlier decisions. Read the linked transcript before acting.
+It ranks sessions by answer length, topic focus, and matching sections. Dates break relevance ties.
+Matching requests, their answers, and nearby clarifications can appear together.
+Each excerpt identifies its cleaned conversation section and why it was selected.
+The pack includes date provenance and a link to each local export.
+
+The default limits are five sources, eight sections per source, and 24,000 excerpt characters per source.
+Complete turns take priority within the budget.
+If the highest-ranked turn exceeds the budget, the pack includes a shortened excerpt with an explicit warning.
+Omitted candidate sections are listed. Read the linked export for context that exceeds either limit.
+Use `--max-chars` to change the character budget:
+
+```bash
+agent-sessions context "example cache" --last 2 --max-chars 32000 \
+  -d /path/to/private-exports/ -o /path/to/private-context.md
+```
+
+Selection is heuristic. It can retain incidental mentions or miss a correction that does not repeat the query.
+Nearby clarification detection uses English text cues. It does not identify verified decisions or resolve conflicting instructions.
+Local section order does not establish chronology across agents. Cursor file dates remain estimates.
+The excerpts exclude tool payloads and marked commentary. Historical claims remain unverified, and historical requests do not authorize current actions.
+
+The command does not call an LLM or change agent configuration.
+Pack generation reads the exports without modifying them.
+An explicit `-o` destination uses atomic replacement with owner-only file permissions on POSIX systems.
+Independent fresh-session usefulness remains unverified.
 
 ### Link related sessions
 

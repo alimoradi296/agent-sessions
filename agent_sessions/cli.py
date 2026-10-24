@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from agent_sessions.analysis.distiller import Distiller, DistilledSession
-from agent_sessions.analysis.context import build_context
+from agent_sessions.analysis.context import DEFAULT_MAX_CHARS, build_context
 from agent_sessions.analysis.doctor import Doctor, render_doctor
 from agent_sessions.analysis.linker import build_graph, load_distilled_sessions, query_graph
 from agent_sessions.analysis.obsidian import ObsidianExporter
@@ -499,12 +499,15 @@ def cmd_report(args: argparse.Namespace) -> None:
 
 
 def cmd_context(args: argparse.Namespace) -> None:
-    directory = Path(args.directory) if args.directory else resolve_output_dir(None)
-    text = build_context(directory, args.query, args.last)
+    directory = Path(args.directory) if args.directory else Path.home() / ".agent-sessions" / "exports"
+    try:
+        text = build_context(directory, args.query, args.last, args.max_chars)
+    except ValueError as error:
+        raise StorageError(str(error)) from error
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
+        atomic_write_text(out, text)
         print(f"Context pack → {out}")
     else:
         print(text, end="")
@@ -617,6 +620,16 @@ def iso_date(value: str) -> str:
         raise argparse.ArgumentTypeError("Use a date in YYYY-MM-DD format")
 
 
+def positive_int(value: str) -> int:
+    try:
+        result = int(value)
+        if result < 1:
+            raise ValueError
+        return result
+    except ValueError:
+        raise argparse.ArgumentTypeError("Use a positive integer")
+
+
 def lock_timeout(value: str) -> float:
     try:
         result = float(value)
@@ -707,7 +720,8 @@ def main() -> None:
     p_context = sub.add_parser("context", help="Build a local pack of cited transcript excerpts")
     p_context.add_argument("query", help="Literal topic text to find in conversations")
     p_context.add_argument("-d", "--directory", help="Exported sessions directory")
-    p_context.add_argument("--last", type=int, default=5, help="Maximum matching sessions (default: 5)")
+    p_context.add_argument("--last", type=positive_int, default=5, help="Maximum sources, ranked by relevance (default: 5)")
+    p_context.add_argument("--max-chars", type=positive_int, default=DEFAULT_MAX_CHARS, help="Excerpt character budget per source (default: 24000)")
     p_context.add_argument("-o", "--output", help="Write the pack to a local file")
 
     p_reconcile = sub.add_parser("reconcile", help="Export only missing or changed local sessions")

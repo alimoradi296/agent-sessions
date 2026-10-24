@@ -119,15 +119,20 @@ agent-sessions context "example cache" --last 5 \
 ```
 
 - [x] Search local conversation text across agents with a literal query.
-- [x] Include the latest request and response from each matching session.
+- [x] Rank matching exchanges and nearby clarifications instead of selecting unrelated latest turns.
 - [x] Include session IDs, dates, date provenance, and links to local exports.
 - [x] Label excerpts as historical and unverified.
 - [x] Keep tool payloads and commentary out of excerpts.
 - [x] Write to stdout or an explicitly selected local file.
+- [x] Include cleaned section references, selection reasons, and explicit budget omissions.
+- [x] Preserve complete turns within a configurable character budget.
+- [x] Use synthetic regression tests for topic drift, nearby corrections, ranking, and long deliverables.
+
+Ranking uses literal matches and English clarification cues. It does not resolve conflicts or establish verified decisions.
+Independent fresh-session evaluation remains open.
 
 ### Context Bridge remaining
 
-- [ ] Rank relevant turns instead of selecting the latest request and response.
 - [ ] Connect conflicting or superseded decisions with their evidence.
 - [ ] Add a structured handoff with decisions, blockers, and checked results.
 - [ ] Evaluate a handoff in a fresh session before claiming that it prevents repeated explanations.
