@@ -24,6 +24,7 @@ Private transcripts, exports, reports, and context packs stay outside the reposi
 | Hook installers | Implemented, runtime compatibility needs separate checks |
 | Read-only archive diagnostics | Implemented with `doctor`, hook execution remains unverified |
 | Concurrent export protection | Implemented with directory locks and atomic replacement per file |
+| Selective reconciliation | Implemented with a read-only dry run, private reports, and optional cron instructions |
 
 An implemented feature is not a guarantee of compatibility with every agent version.
 
@@ -57,9 +58,10 @@ An implemented feature is not a guarantee of compatibility with every agent vers
 - [x] Accept Cursor conversation IDs and transcript hints. Keep hook stdout valid JSON.
 - [x] Test generated launchers from unrelated working directories with synthetic transcripts and isolated homes.
 
+- [x] Add `reconcile` for missing or changed exports, with a read-only dry run and optional cron instructions.
+
 ### Remaining
 
-- [ ] Add a scheduled reconciliation command or documented cron/systemd setup.
 - [ ] Check application-triggered hook execution after reload and trust review on supported agent releases.
 - [ ] Define support for child-agent transcripts and their parent relationships.
 - [ ] Check locking and interrupted writes on Windows.
@@ -76,7 +78,8 @@ An implemented feature is not a guarantee of compatibility with every agent vers
 - Individual export files remain complete after interruption. A retry restores consistency across files.
 
 Atomic replacement is per file. A crash can leave the transcript and indexes from different export attempts.
-`doctor` can detect inconsistencies. Automatic recovery and scheduled reconciliation remain open work.
+`doctor` can detect inconsistencies. `reconcile` can restore content differences from readable sources and valid indexes.
+Invalid or missing archive indexes require explicit restoration. Scheduling remains opt-in.
 
 ## Phase 4 — More accurate extraction
 
@@ -177,7 +180,7 @@ agent-sessions context "example cache" --last 5 \
 ## Execution order
 
 1. Complete ingestion checks and generate a private coverage manifest.
-2. Use `doctor` to inspect private exports. Add scheduled reconciliation after the local export protections.
+2. Use `doctor` to inspect private exports and `reconcile --dry-run` to review missed or changed exports. Enable scheduling only after review.
 3. Evaluate the Context Bridge prototype with a real local handoff.
 4. Improve extraction and evidence references.
 5. Add workflow links, semantic search, analytics, and Obsidian synchronization as needed.

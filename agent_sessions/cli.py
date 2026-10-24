@@ -10,6 +10,7 @@ Commands:
   to-obsidian  Export distilled sessions as Obsidian notes
   report       Generate weekly/aggregate report
   context      Build a local pack of cited transcript excerpts
+  reconcile    Export missing or changed sessions from local sources
   doctor       Inspect sources, exports, indexes, and hooks without changes
   install      Install the Stop hook for an agent
 """
@@ -33,6 +34,7 @@ from agent_sessions.analysis.doctor import Doctor, render_doctor
 from agent_sessions.analysis.linker import build_graph, load_distilled_sessions, query_graph
 from agent_sessions.analysis.obsidian import ObsidianExporter
 from agent_sessions.analysis.report import WeeklyReport, week_start
+from agent_sessions.reconcile import reconcile
 from agent_sessions.models import Agent, Session
 from agent_sessions.hook_setup import install_hooks
 from agent_sessions.parsers import PARSERS
@@ -508,6 +510,24 @@ def cmd_context(args: argparse.Namespace) -> None:
         print(text, end="")
 
 
+def cmd_reconcile(args: argparse.Namespace) -> None:
+    directory = Path(args.output).expanduser() if args.output else Path.home() / ".agent-sessions" / "exports"
+    report = reconcile(directory, [args.agent] if args.agent else None,
+                       dry_run=args.dry_run, lock_timeout=args.lock_timeout)
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        counts = report['counts']
+        changed = counts['would_export'] if args.dry_run else counts['exported']
+        action = 'Would export' if args.dry_run else 'Exported'
+        print(f"{action} {changed} session(s); unchanged: {counts['unchanged']}; empty: {counts['empty']}; errors: {counts['error']}.")
+        for row in report['discovery'] + report['sources']:
+            if row['status'] == 'error':
+                print(f"Source error: {row['agent']} {row.get('session_id', '')} {row.get('error_type', 'source directory absent')}", file=sys.stderr)
+    if report['exit_code']:
+        raise SystemExit(report['exit_code'])
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     # Do not call resolve_output_dir: diagnostics must not create a directory.
     directory = Path(args.directory).expanduser() if args.directory else Path.home() / ".agent-sessions" / "exports"
@@ -690,6 +710,13 @@ def main() -> None:
     p_context.add_argument("--last", type=int, default=5, help="Maximum matching sessions (default: 5)")
     p_context.add_argument("-o", "--output", help="Write the pack to a local file")
 
+    p_reconcile = sub.add_parser("reconcile", help="Export only missing or changed local sessions")
+    p_reconcile.add_argument("--agent", choices=list(PARSERS), help="Only this agent (default: all installed)")
+    p_reconcile.add_argument("-o", "--output", help="Private export directory (default: ~/.agent-sessions/exports)")
+    p_reconcile.add_argument("--dry-run", action="store_true", help="Compare without creating or changing any files")
+    p_reconcile.add_argument("--json", action="store_true", help="Print the local reconciliation report as JSON")
+    p_reconcile.add_argument("--lock-timeout", type=lock_timeout, default=DEFAULT_LOCK_TIMEOUT)
+
     p_doctor = sub.add_parser("doctor", help="Inspect sources, exports, indexes, and hooks without changes")
     p_doctor.add_argument("-d", "--directory", help="Export directory (default: ~/.agent-sessions/exports)")
     p_doctor.add_argument("--agent", choices=list(PARSERS), help="Inspect source and hook configuration for this agent")
@@ -710,7 +737,7 @@ def main() -> None:
         "hook": cmd_hook, "export": cmd_export, "bulk": cmd_bulk,
         "search": cmd_search, "stats": cmd_stats, "distill": cmd_distill,
         "link": cmd_link, "to-obsidian": cmd_to_obsidian, "report": cmd_report,
-        "context": cmd_context, "doctor": cmd_doctor, "install": cmd_install,
+        "reconcile": cmd_reconcile, "context": cmd_context, "doctor": cmd_doctor, "install": cmd_install,
     }
     if args.command not in commands:
         parser.print_help()

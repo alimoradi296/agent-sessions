@@ -193,6 +193,40 @@ The `.agent-sessions.lock` file stays in place. Keep it in place because deletin
 A killed process can leave unused `.agent-sessions-*.tmp` files. Exports and indexes do not load these files.
 The concurrency and interruption tests use synthetic data on the local POSIX environment. Windows lock behavior needs separate runtime checks.
 
+### Reconcile missed or changed exports
+
+```bash
+agent-sessions reconcile --dry-run --json
+agent-sessions reconcile
+agent-sessions reconcile --agent codex -o /path/to/private-exports/
+```
+
+Reconciliation parses local Claude, Codex, and Cursor sources with the current parsers.
+It merges resumed Codex files before comparison.
+It compares transcript content, JSON metadata, and each Markdown index row.
+Only missing or different session exports are replaced. Existing entries without available sources remain in place.
+Unchanged transcripts and indexes keep their contents and modification times.
+The scan reads every discovered source, so large archives can take time.
+
+The default destination is `~/.agent-sessions/exports/`, regardless of the working directory.
+A dry run creates no directories, locks, or reports. Its results can change during concurrent exports.
+A real run holds the export lock throughout the scan and writes a private `reconcile.json` report.
+Reports contain source paths, session IDs, statuses, and error types. They contain no conversation text.
+Each successful run replaces the previous report.
+
+Exit code `1` indicates a source, storage, or index error. Source errors appear in the report, while other readable sources can still export.
+A storage error stops the run. Earlier exports remain available, and the previous report can be stale.
+Absent agents are skipped unless `--agent` explicitly selects one.
+Sources that change during parsing are deferred with an error. A later run reads them again.
+Malformed records that parsers skip are not yet counted in these reports.
+
+A retry can restore differences from an interrupted replacement when the source and both indexes remain readable.
+Invalid indexes stop reconciliation before export replacement. A missing index in an existing archive also requires restoration first.
+Run `doctor` to inspect the archive before restoring an index from a private backup.
+Reconciliation does not delete exports, infer lost history, run hooks, or enable a schedule.
+
+For an optional hourly schedule, see [the scheduling guide](docs/reconciliation.md).
+
 ### Check archive health
 
 ```bash

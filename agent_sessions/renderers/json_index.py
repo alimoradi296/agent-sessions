@@ -47,9 +47,8 @@ class JsonIndexRenderer:
         }
 
     @classmethod
-    def render_update(cls, session: Session, index_path: Path) -> str:
-        """Prepare an update without writing or discarding invalid entries."""
-        validate_session_id(session.id)
+    def read_entries(cls, index_path: Path) -> dict[str, dict]:
+        """Read existing entries without discarding invalid data."""
         entries: dict[str, dict] = {}
         if index_path.exists():
             try:
@@ -83,6 +82,13 @@ class JsonIndexRenderer:
                 raise InvalidIndexError(
                     f"Cannot update invalid or unreadable JSON index at {index_path}. Run doctor before retrying."
                 ) from error
+        return entries
+
+    @classmethod
+    def render_update(cls, session: Session, index_path: Path) -> str:
+        """Prepare an update without writing or discarding invalid entries."""
+        validate_session_id(session.id)
+        entries = cls.read_entries(index_path)
         if session.id in entries and entries[session.id]["agent"] != session.agent.value:
             raise InvalidIndexError("Session ID belongs to another agent. Export to a separate directory.")
         entries[session.id] = cls.session_to_dict(session)

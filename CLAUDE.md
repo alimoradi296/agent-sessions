@@ -13,6 +13,7 @@ agent_sessions/
   models.py           — Session, Message, TokenUsage, ToolCall dataclasses
   cli.py              — argparse CLI: hook, export, bulk, search, stats, install
   hook_setup.py       — Codex/Cursor user-level configuration and pinned launchers
+  reconcile.py        — source comparison, selective export, private reconciliation reports
   storage.py          — directory locks and atomic file replacement
   parsers/
     __init__.py       — PARSERS registry dict

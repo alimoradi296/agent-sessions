@@ -26,3 +26,5 @@ doctor-report*.txt
 .agent-sessions.lock
 .agent-sessions-*.tmp
 *.agent-sessions-backup-*
+reconcile.json
+reconcile-report*.json
