@@ -1,6 +1,9 @@
-# agent-sessions
+# agent-sessions — Claude Code, Codex, and Cursor session exporter
 
-Searchable local exports of Claude Code, Codex, and Cursor transcripts.
+A local Python CLI to export, search, and build cited handoffs from AI coding-agent transcripts.
+Includes archive diagnostics, selective reconciliation, and claim extraction with source references.
+
+Formerly `claude-session-exporter`. The canonical repository is [alimoradi296/agent-sessions](https://github.com/alimoradi296/agent-sessions).
 
 The CLI writes one Markdown file per session ID, a readable index, and a JSON index.
 Repeated exports update the same session file. Optional commands extract decisions and connect related sessions.
@@ -12,6 +15,7 @@ Generated files can contain private conversations, source paths, code, and tool 
 Keep output directories outside public repositories. Git ignore rules are an additional guard, not a redaction system.
 
 See [roadmap.md](roadmap.md) for the current implementation status and planned work.
+Licensed under the [MIT License](LICENSE).
 
 [Try a sample export](#try-a-sample-export) · [Export your sessions](#export-your-sessions) · [Limits and privacy](#limits-and-privacy)
 

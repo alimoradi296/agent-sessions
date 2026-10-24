@@ -188,6 +188,8 @@ Independent fresh-session evaluation remains open.
 
 ## Phase 10 — Packaging and release
 
+- [x] Add a descriptive README title, canonical package URLs, discovery keywords, and the declared MIT license file.
+
 - [ ] Add a configuration file for source paths and output directories.
 - [ ] Add an initialization command with explicit local output destinations.
 - [ ] Check installation and CLI behavior on supported Python versions.

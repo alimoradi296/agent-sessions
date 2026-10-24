@@ -5,11 +5,19 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-sessions"
 version = "0.2.0"
-description = "Universal AI agent session exporter — Claude Code, Codex, Cursor"
+description = "Local Python session exporter for Claude Code, Codex, and Cursor. Search transcripts, extract cited claims, and build structured handoffs."
+keywords = ["claude-code", "codex", "cursor", "session-exporter", "transcripts", "local-first"]
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Ali Moradi"}]
+
+[project.urls]
+Homepage = "https://github.com/alimoradi296/agent-sessions"
+Documentation = "https://github.com/alimoradi296/agent-sessions#readme"
+Repository = "https://github.com/alimoradi296/agent-sessions"
+Issues = "https://github.com/alimoradi296/agent-sessions/issues"
+Roadmap = "https://github.com/alimoradi296/agent-sessions/blob/main/roadmap.md"
 
 [project.scripts]
 agent-sessions = "agent_sessions.cli:main"
