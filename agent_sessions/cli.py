@@ -36,7 +36,7 @@ from agent_sessions.analysis.linker import build_graph, load_distilled_sessions,
 from agent_sessions.analysis.obsidian import ObsidianExporter
 from agent_sessions.analysis.report import WeeklyReport, week_start
 from agent_sessions.reconcile import reconcile
-from agent_sessions.models import Agent, Session
+from agent_sessions.models import Session
 from agent_sessions.hook_setup import install_hooks
 from agent_sessions.parsers import PARSERS
 from agent_sessions.parsers.codex import CodexParser

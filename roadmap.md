@@ -189,6 +189,7 @@ Independent fresh-session evaluation remains open.
 ## Phase 10 — Packaging and release
 
 - [x] Add a descriptive README title, canonical package URLs, discovery keywords, and the declared MIT license file.
+- [x] Remove retired script versions, an unused ignore template, and superseded helper code from the current tree.
 
 - [ ] Add a configuration file for source paths and output directories.
 - [ ] Add an initialization command with explicit local output destinations.

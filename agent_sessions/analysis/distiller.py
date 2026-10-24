@@ -139,7 +139,7 @@ class Distiller:
         claims = claims_from_session(session)
         decisions, deferred, bugs, questions = cls._legacy_fields(claims)
         result_text = "\n".join(c['text'] for c in claims if c['kind'] == 'reported_result')
-        outcome = cls._infer_outcome(result_text, "")
+        outcome = cls._infer_outcome(result_text)
         topic = cls._infer_topic(session, prds)
         project = session.project_slug or cls._infer_project(session.cwd)
         significance = cls._score(session, prds, files, decisions, deferred, bugs)
@@ -190,7 +190,7 @@ class Distiller:
         decisions, deferred, bugs, questions = cls._legacy_fields(claims)
         title = content.split("\n")[0].lstrip("# ").strip() if content else "Untitled"
         result_text = "\n".join(c['text'] for c in claims if c['kind'] == 'reported_result')
-        outcome = cls._infer_outcome(result_text, "")
+        outcome = cls._infer_outcome(result_text)
         topic = cls._infer_topic_from_title(title, prds)
         significance = cls._score_from_meta(meta, prds, files, decisions, deferred, bugs)
 
@@ -363,20 +363,8 @@ class Distiller:
         return results
 
     @staticmethod
-    def _extract_questions(text: str) -> list[str]:
-        results: list[str] = []
-        for line in text.split("\n"):
-            line = line.strip()
-            if "?" in line and 20 < len(line) < 200:
-                if any(kw in line.lower() for kw in ("should we", "what about", "how do", "why ", "open question")):
-                    results.append(line[:200])
-            if len(results) >= 3:
-                break
-        return results
-
-    @staticmethod
-    def _infer_outcome(text: str, title: str) -> str:
-        combined = f"{title} {text}".lower()
+    def _infer_outcome(text: str) -> str:
+        combined = text.lower()
         scores: dict[str, int] = {}
         for outcome, keywords in OUTCOME_KEYWORDS.items():
             scores[outcome] = sum(combined.count(kw) for kw in keywords)

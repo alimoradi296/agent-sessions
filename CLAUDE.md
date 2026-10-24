@@ -11,7 +11,7 @@ agent_sessions/
   __init__.py         — package root, exports public API
   __main__.py         — `python3 -m agent_sessions` entry
   models.py           — Session, Message, TokenUsage, ToolCall dataclasses
-  cli.py              — argparse CLI: hook, export, bulk, search, stats, install
+  cli.py              — CLI commands and hook entry point
   hook_setup.py       — Codex/Cursor user-level configuration and pinned launchers
   reconcile.py        — source comparison, selective export, private reconciliation reports
   storage.py          — directory locks and atomic file replacement
@@ -36,8 +36,6 @@ agent_sessions/
     handoff.py        — structured claim groups with evidence excerpts
     relations.py      — explicit quoted relationship candidates and source references
     transcript.py     — conversation prose filtering
-v1/                   — original naive implementation (preserved for history)
-v2/                   — claude-only smart implementation (preserved for history)
 ```
 
 ## Key Design Decisions (Do Not Revert)
@@ -77,7 +75,6 @@ v2/                   — claude-only smart implementation (preserved for histor
 - Do not put agent-specific logic in renderers
 - Do not add timestamp to output filenames
 - Do not sort the index alphabetically — newest-first insertion order
-- Do not remove v1/ or v2/ — they document the evolution
 - Do not hardcode paths — use Path.home() and the resolution chain
 - Keep generated hook launchers, private configuration, backups, and transcript fixtures outside the repository.
 - Hook stdout must remain JSON. Test generated launchers from an unrelated directory with synthetic data.

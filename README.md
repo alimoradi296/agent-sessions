@@ -490,31 +490,22 @@ agent-sessions report --since 2026-07-01 -o ~/report.md
 The sample procedure verifies export, indexing, and search with synthetic data.
 It does not certify every agent version or hook lifecycle.
 
-## History
+## Project layout
 
-### v1 — Original (Claude-only, naive)
-- `{timestamp}-{session_id}.md` per Stop event — caused hundreds of duplicates
-- Git-log-based summary — never useful
+```text
+agent_sessions/  Python package and CLI
+  parsers/       Claude Code, Codex, and Cursor readers
+  renderers/     Markdown and shared indexes
+  analysis/      Claims, context packs, handoffs, graphs, and reports
+docs/            Command behavior and limits
+examples/        Synthetic demo and fixture
+tests/           Synthetic regression checks
+roadmap.md       Implemented features and remaining work
+```
 
-### v2 — Claude-only, smart
-- Deduplication via `{session_id}.md` naming
-- `away_summary` as real session summary
-- `forkedFrom` tracking
-- `SESSION_INDEX.md`
-
-### v3 — Universal
-- Multi-agent: Claude Code, Codex, Cursor
-- Parser/renderer architecture — new agents are one file
-- Token usage and duration tracking
-- `sessions.json` machine-readable index
-- pip-installable CLI with `export`, `bulk`, `search`, `stats`, `install`
-- `--dry-run` flag
-
-### v0.2 — Knowledge extraction (current)
-- `distill` — structured JSON per session (PRDs, files, decisions, bugs, deferred)
-- `link` — cross-session graph (same PRD, branch, file, fork lineage)
-- `to-obsidian` — Zettelkasten-friendly notes with frontmatter
-- `report` — weekly aggregate report with extracted knowledge
+The current implementation lives in `agent_sessions/`.
+Retired shell-script implementations remain available in Git history.
+Use `agent-sessions install` for the current hook setup.
 
 ## Development
 

@@ -1,6 +1,0 @@
-# Drop this file into your project's docs/sessions/ as .gitignore
-# or add these lines to your root .gitignore
-
-docs/sessions/*.md
-docs/sessions/SESSION_INDEX.md
-docs/sessions/sessions.json

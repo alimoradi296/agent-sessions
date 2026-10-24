@@ -13,7 +13,6 @@ Title is inferred from the first user message.
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -22,13 +21,9 @@ from agent_sessions.models import (
     Agent,
     Message,
     Session,
-    TokenUsage,
     ToolCall,
     ToolResult,
 )
-
-logger = logging.getLogger(__name__)
-
 
 class CursorParser:
     AGENT = Agent.CURSOR
