@@ -90,16 +90,23 @@ Invalid or missing archive indexes require explicit restoration. Scheduling rema
 - [x] Remove broad decision patterns based on “instead of” and “do not.”
 - [x] Label extracted decisions as candidates and outcomes as unverified in reports and notes.
 - [x] Carry date provenance into distilled JSON and Obsidian notes.
+- [x] Attach a speaker, exact quote, source coordinates, and extraction method to each new claim.
+- [x] Separate requests, proposals, decision candidates, reported results, bug reports, deferred work, and open questions.
+- [x] Keep transcript claims marked as not checked, including statements that use verification words.
+- [x] Infer outcomes from reported-result claims rather than requests, titles, or proposals.
+- [x] Evaluate English extraction rules with manually labeled synthetic positive and negative cases.
+- [x] Show claim references in reports and Obsidian notes. Load older distilled files without inventing citations.
 
 ### Remaining
 
-- [ ] Define evidence references for each extracted claim.
-- [ ] Separate requests, proposals, decisions, reported results, and checked results.
-- [ ] Evaluate extraction with a manually labeled synthetic dataset.
+- [ ] Add an independent evidence-review workflow before producing checked results.
 - [ ] Improve file and PRD extraction. Mentions do not prove that a file changed.
 - [ ] Add optional `distill --llm` with a strict output schema.
 - [ ] Require explicit provider configuration before sending transcript data to an API.
 - [ ] Support a local model as an optional extraction backend.
+
+English rules can miss unfamiliar wording and other languages. Labels remain heuristic candidates.
+Checked results require independent evidence review, which is not implemented.
 
 ### Acceptance criteria
 

@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from agent_sessions.analysis.claims import render_claim
+
 
 class WeeklyReport:
     def __init__(self, sessions: list[dict], distilled: Optional[list[dict]] = None):
@@ -122,6 +124,7 @@ class WeeklyReport:
         outcome_counter: Counter = Counter()
         all_deferred: list[str] = []
         all_decisions: list[str] = []
+        cited_claims: list[dict] = []
         significant = [d for d in self.distilled if d.get("significance", 0) >= 3]
 
         for d in self.distilled:
@@ -130,11 +133,13 @@ class WeeklyReport:
             outcome = d.get("outcome", "unknown")
             if outcome != "unknown":
                 outcome_counter[outcome] += 1
-            all_deferred.extend(d.get("deferred", [])[:2])
-            all_decisions.extend(d.get("decisions", [])[:2])
+            cited_claims.extend(d.get("claims", [])[:8])
+            if not d.get("claims"):
+                all_deferred.extend(d.get("deferred", [])[:2])
+                all_decisions.extend(d.get("decisions", [])[:2])
 
         if prd_counter:
-            lines.append("### PRDs Worked On")
+            lines.append("### PRDs Mentioned")
             lines.append("")
             for prd, count in prd_counter.most_common(10):
                 lines.append(f"- {prd} — {count} session(s)")
@@ -156,15 +161,25 @@ class WeeklyReport:
                 )
             lines.append("")
 
+        if cited_claims:
+            lines.extend(["### Extracted Claims (not checked)", "",
+                          "Source references locate what was said. They do not verify it.",
+                          "This summary includes at most eight claims per session and sixteen in total. Full claims remain in distilled JSON.", ""])
+            for claim in cited_claims[:16]:
+                lines.append(render_claim(claim))
+            if len(cited_claims) > 16:
+                lines.append("Additional claims remain in the distilled JSON files.")
+            lines.append("")
+
         if all_decisions:
-            lines.append("### Decision Candidates (unverified)")
+            lines.append("### Legacy Decision Candidates (uncited, unverified)")
             lines.append("")
             for dec in all_decisions[:8]:
                 lines.append(f"- {dec[:120]}")
             lines.append("")
 
         if all_deferred:
-            lines.append("### Deferred Work")
+            lines.append("### Legacy Deferred Work (uncited, unverified)")
             lines.append("")
             for defr in all_deferred[:8]:
                 lines.append(f"- {defr[:120]}")

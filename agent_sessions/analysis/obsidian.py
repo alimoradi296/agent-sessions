@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from agent_sessions.analysis.distiller import DistilledSession
+from agent_sessions.analysis.claims import render_claim
 
 
 class ObsidianExporter:
@@ -82,28 +83,35 @@ class ObsidianExporter:
                 lines.append(f"- [[{prd}]]")
             lines.append("")
 
-        if distilled.decisions:
+        if distilled.claims:
+            lines.extend(["## Extracted Claims (not checked)", "",
+                          "These labels describe conversation text, not verified outcomes.", ""])
+            for claim in distilled.claims:
+                lines.append(render_claim(claim))
+            lines.append("")
+
+        if distilled.decisions and not distilled.claims:
             lines.append("## Decision Candidates (unverified)")
             lines.append("")
             for d in distilled.decisions:
                 lines.append(f"- {d}")
             lines.append("")
 
-        if distilled.bugs_found:
+        if distilled.bugs_found and not distilled.claims:
             lines.append("## Bugs / Issues")
             lines.append("")
             for b in distilled.bugs_found:
                 lines.append(f"- {b}")
             lines.append("")
 
-        if distilled.deferred:
+        if distilled.deferred and not distilled.claims:
             lines.append("## Deferred")
             lines.append("")
             for d in distilled.deferred:
                 lines.append(f"- {d}")
             lines.append("")
 
-        if distilled.open_questions:
+        if distilled.open_questions and not distilled.claims:
             lines.append("## Open Questions")
             lines.append("")
             for q in distilled.open_questions:
@@ -111,7 +119,7 @@ class ObsidianExporter:
             lines.append("")
 
         if distilled.files_touched:
-            lines.append("## Files Touched")
+            lines.append("## Files Mentioned (changes unverified)")
             lines.append("")
             for f in distilled.files_touched[:20]:
                 lines.append(f"- `{f}`")

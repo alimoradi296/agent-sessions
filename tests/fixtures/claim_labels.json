@@ -1,0 +1,324 @@
+[
+  {
+    "name": "imperative request",
+    "role": "user",
+    "text": "Implement the example retry limit.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "polite request",
+    "role": "user",
+    "text": "Please fix the synthetic timeout.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "question request",
+    "role": "user",
+    "text": "Can you verify that the tests passed?",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "negative boundary",
+    "role": "user",
+    "text": "Do not deploy the example application.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "need request",
+    "role": "user",
+    "text": "We need to review the example draft.",
+    "expected": [
+      "request"
+    ]
+  },
+  {
+    "name": "explicit proposal",
+    "role": "assistant",
+    "text": "Proposal: keep the example cache local.",
+    "expected": [
+      "proposal"
+    ]
+  },
+  {
+    "name": "recommendation",
+    "role": "assistant",
+    "text": "I recommend a bounded retry count.",
+    "expected": [
+      "proposal"
+    ]
+  },
+  {
+    "name": "future intention",
+    "role": "assistant",
+    "text": "We will use the example worker.",
+    "expected": [
+      "proposal"
+    ]
+  },
+  {
+    "name": "consider option",
+    "role": "user",
+    "text": "Consider using a queue for the example job.",
+    "expected": [
+      "proposal"
+    ]
+  },
+  {
+    "name": "explicit decision",
+    "role": "assistant",
+    "text": "Decision: Keep the example cache local.",
+    "expected": [
+      "decision_candidate"
+    ]
+  },
+  {
+    "name": "stated decision",
+    "role": "user",
+    "text": "We decided to use a bounded retry count.",
+    "expected": [
+      "decision_candidate"
+    ]
+  },
+  {
+    "name": "negative decision",
+    "role": "assistant",
+    "text": "We decided not to deploy the example build.",
+    "expected": [
+      "decision_candidate"
+    ]
+  },
+  {
+    "name": "undecided",
+    "role": "assistant",
+    "text": "Decision: We have not decided which queue to use.",
+    "expected": []
+  },
+  {
+    "name": "pending decision",
+    "role": "assistant",
+    "text": "The decision is pending.",
+    "expected": []
+  },
+  {
+    "name": "reported test success",
+    "role": "assistant",
+    "text": "Tests passed for the synthetic retry module.",
+    "expected": [
+      "reported_result"
+    ]
+  },
+  {
+    "name": "reported test failure",
+    "role": "assistant",
+    "text": "Tests failed for the synthetic retry module.",
+    "expected": [
+      "reported_result"
+    ]
+  },
+  {
+    "name": "reported execution",
+    "role": "assistant",
+    "text": "I ran the example checks locally.",
+    "expected": [
+      "reported_result"
+    ]
+  },
+  {
+    "name": "reported implementation",
+    "role": "assistant",
+    "text": "Implemented the example retry limit.",
+    "expected": [
+      "reported_result"
+    ]
+  },
+  {
+    "name": "reported deployment",
+    "role": "user",
+    "text": "We deployed the example build.",
+    "expected": [
+      "reported_result"
+    ]
+  },
+  {
+    "name": "verification word is only reported",
+    "role": "assistant",
+    "text": "Verified: all example checks passed.",
+    "expected": [
+      "reported_result"
+    ]
+  },
+  {
+    "name": "checked word is only reported",
+    "role": "assistant",
+    "text": "Checked result: the example tests passed.",
+    "expected": [
+      "reported_result"
+    ]
+  },
+  {
+    "name": "conditional result",
+    "role": "assistant",
+    "text": "If the tests passed, we can deploy later.",
+    "expected": []
+  },
+  {
+    "name": "hypothetical result",
+    "role": "assistant",
+    "text": "Tests would pass after a repair.",
+    "expected": []
+  },
+  {
+    "name": "future result",
+    "role": "assistant",
+    "text": "Result: tests will pass after the proposed repair.",
+    "expected": []
+  },
+  {
+    "name": "result question",
+    "role": "assistant",
+    "text": "Tests passed on the real host?",
+    "expected": []
+  },
+  {
+    "name": "bug report",
+    "role": "assistant",
+    "text": "Root cause: the synthetic worker has no retry limit.",
+    "expected": [
+      "bug_report"
+    ]
+  },
+  {
+    "name": "deferred work",
+    "role": "assistant",
+    "text": "Deferred: optimize the synthetic queue next week.",
+    "expected": [
+      "deferred"
+    ]
+  },
+  {
+    "name": "scope exclusion",
+    "role": "assistant",
+    "text": "Out of scope: deploying the example application.",
+    "expected": [
+      "deferred"
+    ]
+  },
+  {
+    "name": "open question",
+    "role": "assistant",
+    "text": "Open question: should we retry the example job?",
+    "expected": [
+      "open_question"
+    ]
+  },
+  {
+    "name": "unmarked question",
+    "role": "user",
+    "text": "Should we retain the example retry history?",
+    "expected": [
+      "open_question"
+    ]
+  },
+  {
+    "name": "markdown emphasis",
+    "role": "assistant",
+    "text": "- **Decision:** Keep the example cache local.",
+    "expected": [
+      "decision_candidate"
+    ]
+  },
+  {
+    "name": "quoted text",
+    "role": "assistant",
+    "text": "> Decision: Ignore this quoted example.",
+    "expected": []
+  },
+  {
+    "name": "code example",
+    "role": "assistant",
+    "text": "```text\nDecision: Ignore this code example.\n```",
+    "expected": []
+  },
+  {
+    "name": "instruction context",
+    "role": "user",
+    "text": "<system_reminder>Decision: Ignore this instruction.</system_reminder>",
+    "expected": []
+  },
+  {
+    "name": "commentary",
+    "role": "assistant",
+    "phase": "commentary",
+    "text": "Decision: Ignore this intermediate narration.",
+    "expected": []
+  },
+  {
+    "name": "analysis",
+    "role": "assistant",
+    "phase": "analysis",
+    "text": "Tests passed in this invented reasoning example.",
+    "expected": []
+  },
+  {
+    "name": "tool output",
+    "role": "tool",
+    "text": "Tests passed for the example module.",
+    "expected": []
+  },
+  {
+    "name": "system text",
+    "role": "system",
+    "text": "Decision: Ignore this system text.",
+    "expected": []
+  },
+  {
+    "name": "unrecognized language abstention",
+    "role": "user",
+    "text": "این یک مثال ساختگی برای آزمون است.",
+    "expected": []
+  },
+  {
+    "name": "multiple claim lines",
+    "role": "assistant",
+    "text": "Proposal: keep retries bounded.\nDecision: Use a limit of three.\nTests passed in the synthetic suite.",
+    "expected": [
+      "proposal",
+      "decision_candidate",
+      "reported_result"
+    ]
+  },
+  {
+    "name": "bare decision heading",
+    "role": "assistant",
+    "text": "Decision:",
+    "expected": []
+  },
+  {
+    "name": "bare proposal heading",
+    "role": "assistant",
+    "text": "Proposal:",
+    "expected": []
+  },
+  {
+    "name": "bare result heading",
+    "role": "assistant",
+    "text": "Result:",
+    "expected": []
+  },
+  {
+    "name": "complete short result",
+    "role": "assistant",
+    "text": "Tests passed.",
+    "expected": [
+      "reported_result"
+    ]
+  }
+]

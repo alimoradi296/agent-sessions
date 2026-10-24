@@ -27,6 +27,7 @@ agent_sessions/
     json_index.py     — Session → sessions.json (machine-readable)
   analysis/
     distiller.py      — Session → .distilled.json
+    claims.py         — candidate claim types and exact conversation evidence
     linker.py         — cross-session graph
     obsidian.py       — distilled → Obsidian notes
     report.py         — weekly reports
@@ -46,6 +47,7 @@ v2/                   — claude-only smart implementation (preserved for histor
 - **`SESSION_INDEX.md` stays one line per session** — grep-able. Never turn it into a full transcript.
 - **`sessions.json` is the programmatic interface** — all metadata, tokens, durations. Markdown is for humans.
 - **Token usage is cumulative** — Codex gives `total_token_usage` snapshots (use last one). Claude gives per-message usage (sum all).
+- **Claims are not verification** — preserve speaker, exact quote, and source coordinates. Never promote transcript text to a checked result.
 - **No external dependencies** — stdlib only. This must run on any machine with Python 3.10+.
 
 ## JSONL Format Reference

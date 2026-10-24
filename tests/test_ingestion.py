@@ -207,7 +207,7 @@ class IngestionTests(unittest.TestCase):
         fallback = Distiller.distill_from_markdown(md)
         self.assertNotIn('bogus', ' '.join(fallback.decisions))
         distilled.save(out)
-        self.assertEqual(DistilledSession.load(out / f'{SID}.distilled.json').distill_version, 2)
+        self.assertEqual(DistilledSession.load(out / f'{SID}.distilled.json').distill_version, 3)
 
     def test_read_errors_are_reported_and_fail_bulk(self):
         out = self.home / 'exported'

@@ -338,7 +338,7 @@ Turn transcripts into structured knowledge:
 ```
 Raw transcript (.md)
     ↓
-distill  →  {session_id}.distilled.json  (PRDs, files, decisions, bugs, deferred)
+distill  →  {session_id}.distilled.json  (cited claims, mentions, metadata)
     ↓
 link     →  sessions_graph.json           (cross-session relationships)
     ↓
@@ -359,15 +359,28 @@ agent-sessions distill -d ~/.agent-sessions/exports/ --significant-only
 agent-sessions distill <session-id> -d ~/.agent-sessions/exports/
 ```
 
-Each `.distilled.json` contains:
-- PRDs worked on, files touched, tools/commands used
-- Inferred outcome (implemented, fixed, reviewed, planned, etc.)
-- Extracted decisions, bugs, deferred work, open questions
-- Significance score (0–10) for filtering
+Each new `.distilled.json` contains:
 
-Decisions are heuristic candidates. Outcomes remain unverified claims.
-Tool payloads, code blocks, quoted text, and common instruction blocks do not feed decision extraction.
-File paths and PRD mentions do not prove that the session changed those files or delivered those requirements.
+- Candidate claims with types, exact quotes, speakers, source coordinates, and extraction methods.
+- PRD and file mentions, plus tools and commands used.
+- An unverified outcome inferred from reported-result claims.
+- Legacy decision, bug, deferred-work, and question fields for compatibility.
+- A significance score for filtering.
+
+Claim types distinguish requests, proposals, decision candidates, reported results, bug reports, deferred work, and open questions.
+All extracted claims have `verification: "not_checked"`.
+Words such as “verified” and “checked” remain speaker reports. They do not establish independent verification.
+Requests, proposals, titles, and summaries do not establish completed work.
+
+Version 3 adds the `claims` field. Older distilled files still load, without invented evidence references.
+Re-run `distill` to produce cited claims from available sources or exports.
+Reports and Obsidian notes show claim types and source references.
+The extraction rules recognize a limited set of English patterns and can miss other wording or languages.
+The labeled synthetic cases test these rules. They do not establish accuracy on arbitrary transcripts.
+
+Tool payloads, code blocks, quoted text, and common instruction blocks do not feed claim extraction.
+File and PRD mentions do not prove changes or completed requirements.
+See [claim types and evidence references](docs/extraction.md) for the schema and limits.
 
 ### Context Bridge prototype
 

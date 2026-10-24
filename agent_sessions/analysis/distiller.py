@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Optional
 
 from agent_sessions.models import Session
-from agent_sessions.analysis.transcript import clean_knowledge_text, conversation_sections
+from agent_sessions.analysis.claims import claims_from_session, claims_from_markdown
+from agent_sessions.storage import atomic_write_text, validate_session_id
 
 # ── Patterns ────────────────────────────────────────────────────────────────
 
@@ -106,20 +107,22 @@ class DistilledSession:
     summary: str = ""
     date_source: str = "unknown"
     outcome_source: str = "heuristic_unverified"
-    distill_version: int = 2
+    claims: list[dict] = field(default_factory=list)
+    distill_version: int = 3
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     def save(self, out_dir: Path) -> Path:
-        out_dir.mkdir(parents=True, exist_ok=True)
+        validate_session_id(self.session_id)
         path = out_dir / f"{self.session_id}.distilled.json"
-        path.write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        atomic_write_text(path, json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n")
         return path
 
     @classmethod
     def load(cls, path: Path) -> DistilledSession:
         data = json.loads(path.read_text(encoding="utf-8"))
+        data.setdefault("distill_version", 1)
         return cls(**data)
 
 
@@ -129,16 +132,14 @@ class Distiller:
     @classmethod
     def distill(cls, session: Session) -> DistilledSession:
         full_text = cls._full_text(session)
-        knowledge_text = cls._knowledge_text(session)
         files = cls._extract_files(session, full_text)
         prds = cls._extract_prds(full_text)
         tools = cls._extract_tools(session)
         commands = cls._extract_commands(full_text)
-        deferred = cls._extract_matches(knowledge_text, DEFERRED_PATTERNS, max_items=5)
-        decisions = cls._extract_matches(knowledge_text, DECISION_PATTERNS, max_items=5)
-        bugs = cls._extract_matches(knowledge_text, BUG_PATTERNS, max_items=5)
-        questions = cls._extract_questions(knowledge_text)
-        outcome = cls._infer_outcome(knowledge_text, session.title)
+        claims = claims_from_session(session)
+        decisions, deferred, bugs, questions = cls._legacy_fields(claims)
+        result_text = "\n".join(c['text'] for c in claims if c['kind'] == 'reported_result')
+        outcome = cls._infer_outcome(result_text, "")
         topic = cls._infer_topic(session, prds)
         project = session.project_slug or cls._infer_project(session.cwd)
         significance = cls._score(session, prds, files, decisions, deferred, bugs)
@@ -163,6 +164,7 @@ class Distiller:
             commands_used=sorted(commands),
             outcome=outcome,
             significance=significance,
+            claims=claims,
             decisions=decisions,
             bugs_found=bugs,
             deferred=deferred,
@@ -180,20 +182,15 @@ class Distiller:
 
         session_id = md_path.stem
         full_text = content
-        # Export headers, tool evidence, and arbitrary source code are not
-        # decision text. Only conversation sections feed knowledge heuristics.
-        knowledge_text = "\n".join(text for _, text in conversation_sections(content))
-
         prds = cls._extract_prds(full_text)
         files = cls._extract_files_from_text(full_text)
         tools = cls._extract_tools_from_text(full_text)
         commands = cls._extract_commands(full_text)
-        deferred = cls._extract_matches(knowledge_text, DEFERRED_PATTERNS, max_items=5)
-        decisions = cls._extract_matches(knowledge_text, DECISION_PATTERNS, max_items=5)
-        bugs = cls._extract_matches(knowledge_text, BUG_PATTERNS, max_items=5)
-        questions = cls._extract_questions(knowledge_text)
+        claims = claims_from_markdown(md_path, content, meta.get("agent", "unknown"))
+        decisions, deferred, bugs, questions = cls._legacy_fields(claims)
         title = content.split("\n")[0].lstrip("# ").strip() if content else "Untitled"
-        outcome = cls._infer_outcome(knowledge_text, title)
+        result_text = "\n".join(c['text'] for c in claims if c['kind'] == 'reported_result')
+        outcome = cls._infer_outcome(result_text, "")
         topic = cls._infer_topic_from_title(title, prds)
         significance = cls._score_from_meta(meta, prds, files, decisions, deferred, bugs)
 
@@ -217,11 +214,33 @@ class Distiller:
             commands_used=sorted(commands),
             outcome=outcome,
             significance=significance,
+            claims=claims,
             decisions=decisions,
             bugs_found=bugs,
             deferred=deferred,
             open_questions=questions,
             summary=(meta.get("summary") or title)[:300],
+        )
+
+    @classmethod
+    def _legacy_fields(cls, claims: list[dict]) -> tuple[list, list, list, list]:
+        """Keep old string fields as compatibility views of cited claims."""
+        def snippets(kind, patterns):
+            results = []
+            for claim in claims:
+                if claim['kind'] != kind:
+                    continue
+                text = claim['text'].replace('**', '').replace('__', '')
+                matches = cls._extract_matches(text, patterns, max_items=1)
+                snippet = matches[0] if matches else text
+                if snippet not in results:
+                    results.append(snippet)
+            return results[:5]
+        return (
+            snippets('decision_candidate', DECISION_PATTERNS),
+            snippets('deferred', DEFERRED_PATTERNS),
+            snippets('bug_report', BUG_PATTERNS),
+            [c['text'] for c in claims if c['kind'] == 'open_question'][:3],
         )
 
     @classmethod
@@ -246,12 +265,6 @@ class Distiller:
             for tc in msg.tool_calls:
                 parts.append(f"{tc.name} {tc.input_summary}")
         return "\n".join(parts)
-
-    @classmethod
-    def _knowledge_text(cls, session: Session) -> str:
-        return "\n".join(clean_knowledge_text(msg.text) for msg in session.messages
-                         if msg.role in ("user", "assistant") and msg.phase not in ("analysis", "commentary"))
-
 
     @staticmethod
     def _extract_prds(text: str) -> list[str]:
