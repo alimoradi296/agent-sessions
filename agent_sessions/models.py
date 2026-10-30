@@ -84,6 +84,16 @@ class Session:
     observed_at: Optional[datetime] = None
 
     @property
+    def tool_record_counts(self) -> dict[str, int]:
+        """Counts of parsed records, without execution or pairing inference."""
+        calls = [call for message in self.messages for call in message.tool_calls]
+        results = [result for message in self.messages for result in message.tool_results]
+        def identified(record):
+            return isinstance(record.call_id, str) and bool(record.call_id.strip())
+        return dict(calls=len(calls), calls_with_id=sum(identified(call) for call in calls),
+                    results=len(results), results_with_id=sum(identified(result) for result in results))
+
+    @property
     def duration_seconds(self) -> Optional[float]:
         if self.started_at and self.ended_at:
             return (self.ended_at - self.started_at).total_seconds()

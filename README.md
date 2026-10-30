@@ -2,6 +2,27 @@
 
 A local Python CLI to export, search, and build cited handoffs from AI coding-agent transcripts.
 Includes archive diagnostics, selective reconciliation, and claim extraction with source references.
+It can also recover complete captured `Add File` bodies and exact-base updates that survive inside direct or orchestrated Codex patch records.
+Captured deletions become explicit tombstones instead of leaving obsolete files in the recovered output.
+Linked tool results distinguish confirmed success, confirmed failure, and unknown execution; failed operations
+are skipped instead of being replayed as if they succeeded. The private manifest includes source line references
+for each linked result and any skipped failure.
+
+Find a past engineering exchange, pin its critical constraints, and build a handoff that must retain them.
+A read-only audit detects changed selected evidence, edited bundles, and new explicit quoted challenges across agents.
+Coverage checks retained evidence. It does not establish that a statement is true or that an agent understood it.
+
+[Try the context-loss example](docs/continuity.md) · [Session family digest](docs/family-digest.md) · [Product hypothesis and related tools](docs/product-direction.md)
+
+For repeated use, save a topic once and rebuild its handoff with `agent-sessions resume <topic>`.
+Private capture history preserves earlier packs and shows changes when evidence or review state changes.
+See [the private workspace guide](docs/workspace.md) for setup, evidence pins, and review.
+Assistants can collect cited candidate paragraphs with `handoff suggest` before choosing pins.
+These [automatic proposals](docs/automatic-evidence.md) remain unaccepted and never certify readiness or complete discovery.
+The assistant can [batch-import selected evidence](docs/assistant-selection-import.md) from a private review packet with source and review checks.
+Optional `--compact-review` preserves each source occurrence while reducing repeated text when the complete plan benefits; otherwise it keeps the ordinary packet.
+For repeated use, [topic review refresh](docs/topic-review-refresh.md) preserves explicit pins and prior captures while updating generated selections.
+The [bundled continuation skill](docs/continuation-skill.md) lets an assistant run this sequence without asking you to select passages.
 
 Formerly `claude-session-exporter`. The canonical repository is [alimoradi296/agent-sessions](https://github.com/alimoradi296/agent-sessions).
 
@@ -13,6 +34,15 @@ Repeated exports update the same session file. Optional commands extract decisio
 Exports and analysis run locally with the Python standard library. These commands do not upload transcript data.
 Generated files can contain private conversations, source paths, code, and tool outputs.
 Keep output directories outside public repositories. Git ignore rules are an additional guard, not a redaction system.
+
+For a bounded restoration, use `agent-sessions restore SOURCE [SOURCE ...] --source-root ROOT -o PRIVATE_OUTPUT`.
+The report separates missing, changed, matching, and non-regular current paths so recovery work can start with actual gaps.
+The historical source root may be absent, allowing reconstruction after a project directory was deleted.
+Multiple resumed-session files can be supplied in explicit chronological order.
+Alternatively, pass one raw-session directory to discover relevant timestamped JSONL segments automatically.
+The default terminal report lists each recovered path with its current state, execution evidence, and any blocked update prefix.
+The command executes no historical code and labels execution and latest-state status as unknown.
+See [captured file restoration](docs/captured-file-restoration.md) for supported evidence and refusal rules.
 
 See [roadmap.md](roadmap.md) for the current implementation status and planned work.
 Licensed under the [MIT License](LICENSE).
@@ -42,7 +72,7 @@ demo-output/
 └── sessions.json
 ```
 
-Search the exported title and summary:
+Search the exported conversation:
 
 ```bash
 agent-sessions search "retry" -d demo-output
@@ -50,6 +80,50 @@ agent-sessions stats -d demo-output
 ```
 
 Open `demo-output/sample-session.md` to inspect the conversation and session metadata.
+
+## Inspect a forked or spawned family
+
+After exports exist, build a cited lineage digest from recorded `parent_id` links:
+
+```bash
+python examples/family_digest_demo.py --output-dir /tmp/agent-sessions-family-mvp
+agent-sessions family synthetic-family-child -d /tmp/agent-sessions-family-mvp/exports
+```
+
+The demo uses invented sessions only. See [session family digest](docs/family-digest.md) for limits and the pin/audit follow-up.
+The digest also lists continuation-signal candidates (scope boundaries, blockers, open questions, next actions) so a forked task can resume with less manual scanning.
+It can also generate a ready-to-audit requirements contract directly from suggested pins via `--requirements-out`.
+It now supports one-command `--bundle-out` to generate a handoff bundle from family suggestions and optionally audit it.
+Signal filtering is configurable with `--signal-kind` and `--pin-signal-kind` for lower-noise workflows.
+Use `--require-signal-kind` to refuse bundle generation when a critical carry-over signal is missing.
+
+## Reuse a handoff topic
+
+```bash
+agent-sessions init --archive /path/to/private-exports
+agent-sessions topic add cache-review --query "example cache"
+agent-sessions topic search cache-review "discovery publish"
+```
+
+Pin the intended evidence from a search result:
+
+```bash
+agent-sessions topic pin cache-review --id scope --session synthetic-scope --section 2 \
+  --unit paragraph --quote "Discovery only. Do not implement or publish."
+agent-sessions resume cache-review
+```
+
+Replace the synthetic source reference with the intended local evidence.
+Topics save archive paths, requirements, and limits in a private workspace outside Git checkouts.
+`resume` rebuilds a local handoff and reports review blockers. It starts no agent.
+`resume --print` emits handoff text only when all readiness gates pass.
+Requirement packs render selected evidence directly, with citations and review notes.
+Their manifests report excerpt characters separately from framing, review, and citation characters.
+`topic history` and `topic changes --diff` show captured revisions and their differences.
+Earlier ready captures remain historical references and never replace a failed current pack automatically.
+Repeatable `--project` selectors on `topic add` or `topic set` bound the topic by exact recorded working directories and project slugs.
+This prevents unrelated sessions from supplying excerpts or review candidates. The manifest shows exclusions and missing metadata.
+See [the workspace guide](docs/workspace.md) for changed limits and candidate-specific review notes.
 
 ## Supported Agents
 
@@ -159,6 +233,25 @@ Identical records across files count once. Repeated records within a file remain
 The same merge applies to single-session export, hooks, and source-based distillation.
 
 The optional `coverage.json` records each source file as `exported`, `empty`, `outside_period`, or `error`.
+
+Coverage format version 2 adds `record_counts` for each parsed source file:
+
+- `records`: nonblank JSONL lines, including malformed JSON.
+- `blank_lines`: blank lines, counted separately.
+- `handled`: recognized records, including metadata and messages with no exportable text.
+- `ignored`: known records intentionally excluded, such as reasoning or sidechain messages.
+- `malformed`: invalid JSON, non-object records, or invalid shapes detected by the parser.
+- `unsupported`: unknown event types, subtypes, roles, or content blocks.
+
+Each nonblank line counts in one category. Malformed records are skipped. A record with an unsupported
+content block can still contribute recognized text or tools. These counts do not measure lost messages
+or validate every nested field. Codex counts describe each physical file before resumed-file overlap
+is removed. Counts remain available for empty sessions and sources outside the requested date range.
+Reports include counts without raw lines, transcript text, or unknown event names.
+
+Bulk export prints a warning when malformed or unsupported records occur. Its exit code remains zero
+if export succeeds; unreadable sources still cause exit code 1. `doctor` reports record coverage
+warnings with counts and exit code 1. Known ignored records alone do not cause coverage warnings.
 Read failures produce an `error` entry and a nonzero exit status.
 Multiple exported source files can contribute to one session.
 Coverage applies to discovered main transcripts. Child-agent transcript discovery is planned.
@@ -267,8 +360,82 @@ Reports contain local paths and session IDs. Keep these reports outside public r
 
 ```bash
 agent-sessions search "authentication"
-agent-sessions search "retry" -d ~/my-sessions/
+agent-sessions search "cache retry" -d ~/my-sessions/ --json
+agent-sessions search "cache retry" --agent codex --role assistant --limit 20
+agent-sessions search "cache retry" --project example-project --since 2026-02-01 --until 2026-03-01
+agent-sessions search "retry cache" --match any
+agent-sessions search "AttributeError" --view evidence --role user --json
+agent-sessions index -d ~/my-sessions/
 ```
+
+Search ranks conversation passages with SQLite FTS5 and BM25.
+Each result includes an exact text slice, session ID, section number, source hash, and date provenance.
+The default dialogue view excludes tool payloads, code blocks, instruction blocks, commentary, and analysis.
+Use `--view evidence` for raw rendered messages, including code, tracebacks, tool payloads, and phase-tagged text.
+Evidence hits use message numbers and exact source character offsets rather than cleaned handoff section numbers.
+They remain unverified source material and cannot establish that a supplied command was executed.
+See [evidence search and its comparison](docs/evidence-search.md) for citations and limits.
+Titles alone do not supply passage matches.
+
+The default query requires all words in a passage, in any order.
+`--match any` accepts any word. `--match phrase` requires the words in order.
+Queries do not interpret regular expressions or Boolean operators.
+Project filters match an exact project slug or working directory.
+Date filters use recorded session dates. Estimated Cursor dates remain labeled.
+
+Unscoped search refreshes a private `.agent-sessions-search.sqlite3` cache inside the archive.
+Each declared project-selector set uses a separate hash-named cache.
+The evidence view uses a separate cache with an `-evidence` suffix.
+Scoped refresh reads only matching transcript files. It still reads the shared metadata index.
+The refresh hashes eligible exports and updates changed passages in one SQLite transaction.
+Repeated searches still read export bytes, but unchanged passages need no new parsing or indexing.
+The refresh removes missing transcripts from the cache and reports them.
+Unreadable sources stop retrieval instead of returning stale evidence.
+The export lock coordinates this refresh with cooperating writers.
+Source changes after retrieval remain possible.
+
+The cache contains private conversation text. It uses owner-only permissions on POSIX systems.
+SQLite FTS5 support is required. No extra Python package or embedding API is needed.
+`index --rebuild` replaces a damaged cache without changing exports.
+For a scoped cache, include the same repeated `--project` selectors on the index command.
+For an evidence cache, also include `--view evidence`.
+Filters do not remove private content from other existing caches or exports.
+
+### Keep critical evidence in a handoff
+
+```bash
+agent-sessions handoff pin --id scope --session synthetic-scope --section 2 \
+  --quote "Discovery only. Do not implement or publish." \
+  -d /path/to/private-exports \
+  -o /path/to/private-work/handoff-requirements.json
+
+agent-sessions handoff build "example cache" \
+  --requirements /path/to/private-work/handoff-requirements.json \
+  -d /path/to/private-exports -o /path/to/private-work/handoff
+
+agent-sessions handoff audit /path/to/private-work/handoff \
+  -d /path/to/private-exports --json
+```
+
+Replace the synthetic source ID, section, and quote with references from your search results.
+Required evidence takes priority even when it does not repeat the query.
+If limits exclude a required section, the build writes a reviewable draft and exits with code `1`.
+The default total handoff limit is 64,000 characters, including framing. `--max-total-chars` changes that limit.
+Optional passages leave the pack before required evidence. A pack that still exceeds the total limit remains a draft.
+Unrelated appended messages do not invalidate identical selected sections.
+The compiler relocates a pinned section only with one complete text-and-speaker match.
+Changed qualifications and ambiguous duplicates require inspection.
+`handoff pin --unit paragraph --quote "exact text"` explicitly selects the complete containing paragraph from a long turn.
+The pack cites its cleaned line range and states that the complete section is absent.
+The complete section hash still detects changes to surrounding qualifications.
+
+The compiler and audit also scan other indexed sessions for explicit quoted corrections, supersession, and conflicts.
+An unreviewed challenge prevents readiness even when the original pinned file remains unchanged.
+`handoff review` records a candidate-specific operator note without establishing correctness or granting authorization.
+The audit compares bundle identity and selected evidence against current exports without changing files.
+This workflow runs no quoted commands and does not grant authorization to historical requests.
+
+See [the guide](docs/continuity.md) for limits, failure statuses, and the synthetic demonstration.
 
 ### View aggregate stats
 
@@ -458,7 +625,7 @@ agent-sessions link --file example.py -d ~/.agent-sessions/exports/
 agent-sessions link --session-id 826db1cf-... -d ~/.agent-sessions/exports/
 ```
 
-Graph edge types: `same_prd`, `same_branch`, `same_file`, `forked_from`
+Graph edge types: `same_prd`, `same_branch`, `same_file`, `forked_from`, `spawned_from` (Codex subagent)
 
 ### Export to Obsidian
 

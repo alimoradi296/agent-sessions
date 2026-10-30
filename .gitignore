@@ -28,3 +28,7 @@ doctor-report*.txt
 *.agent-sessions-backup-*
 reconcile.json
 reconcile-report*.json
+.agent-sessions-search.sqlite3*
+.agent-sessions-search-*
+handoff-bundles/
+handoff-requirements*.json

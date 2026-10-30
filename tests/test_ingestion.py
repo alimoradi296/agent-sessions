@@ -93,6 +93,26 @@ class IngestionTests(unittest.TestCase):
         self.assertIn(long_output, rendered)
         self.assertEqual(session.messages[0].source_line, 3)
 
+    def test_codex_subagent_uses_thread_id_and_records_parent(self):
+        child_id = '33333333-3333-4333-8333-333333333333'
+        child = self.write('child.jsonl', [
+            event('session_meta', {
+                'id': child_id,
+                'session_id': SID,
+                'parent_thread_id': SID,
+                'cwd': '/workspace/example-project',
+            }),
+            message('user', 'Synthetic child task.', 1),
+        ])
+
+        self.assertEqual(CodexParser.session_id(child), child_id)
+        session = CodexParser.parse(child)
+        self.assertEqual(session.id, child_id)
+        self.assertEqual(session.parent_id, SID)
+        rendered = MarkdownRenderer.render(session)
+        self.assertIn(f'**Spawned by:** `{SID}`', rendered)
+        self.assertNotIn('Forked from', rendered)
+
     def test_resume_overlap_and_repeat_prompts_survive_single_and_bulk_export(self):
         prefix = '.codex/sessions/2026/02/03/'
         shared = [meta(), message('user', 'Check again.', 1),
@@ -182,11 +202,14 @@ class IngestionTests(unittest.TestCase):
         out = self.home / 'exported'
         args = Namespace(agent='codex', project=None, output=str(out), cwd=None,
                          dry_run=False, coverage=True, since='2026-03-01', until=None)
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as warnings:
             cmd_bulk(args)
+        self.assertIn('Coverage warning:', warnings.getvalue())
         coverage = json.loads((out / 'coverage.json').read_text())
         self.assertEqual(sorted(r['status'] for r in coverage['sources']), ['empty', 'outside_period'])
         self.assertEqual(coverage['exported_sessions'], 0)
+        filtered = next(r for r in coverage['sources'] if r['status'] == 'outside_period')
+        self.assertEqual(filtered['record_counts']['malformed'], 2)
 
     def test_decisions_exclude_instructions_tools_quotes_and_code(self):
         session = Session(id=SID, agent=Agent.CODEX, messages=[

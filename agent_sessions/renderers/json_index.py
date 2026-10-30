@@ -33,6 +33,7 @@ class JsonIndexRenderer:
             "duration_human": session.duration_human,
             "parent_id": session.parent_id,
             "message_count": session.message_count,
+            "parsed_tool_records": session.tool_record_counts,
             "user_messages": session.user_message_count,
             "assistant_messages": session.assistant_message_count,
             "tokens": {

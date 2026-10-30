@@ -1,0 +1,9 @@
+include README.md LICENSE roadmap.md pyproject.toml
+recursive-include docs *.md
+recursive-include examples *.py *.mjs *.cjs *.json
+recursive-include examples/patches *.patch *.md
+include examples/sample-session.jsonl
+include examples/otel-hook-requirements.txt
+recursive-include tests *.py *.json
+recursive-include agent_sessions/skills *.md
+global-exclude __pycache__ *.py[cod] .DS_Store

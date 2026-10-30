@@ -4,13 +4,20 @@ Commands:
   export       Export a single session by ID (also used as hook target)
   bulk         Export all sessions for an agent
   search       Search across all exported sessions
+  index        Refresh the local passage search cache
   stats        Show aggregate stats across all sessions
   distill      Extract structured knowledge from sessions
   link         Find related sessions / build session graph
   to-obsidian  Export distilled sessions as Obsidian notes
   report       Generate weekly/aggregate report
   context      Build a local pack of cited transcript excerpts
+  handoff      Pin critical evidence, build a handoff, and audit retained sources
+  init         Create a private workspace outside Git checkouts
+  topic        Save queries and evidence requirements for repeated use
+  resume       Rebuild a saved topic's handoff and report readiness
   reconcile    Export missing or changed sessions from local sources
+  restore      Recover captured file bytes into a new private directory
+  family       Build a cited lineage digest from exported parent_id links
   doctor       Inspect sources, exports, indexes, and hooks without changes
   install      Install the Stop hook for an agent
 """
@@ -22,7 +29,6 @@ import contextlib
 import io
 import json
 import math
-import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -35,7 +41,32 @@ from agent_sessions.analysis.doctor import Doctor, render_doctor
 from agent_sessions.analysis.linker import build_graph, load_distilled_sessions, query_graph
 from agent_sessions.analysis.obsidian import ObsidianExporter
 from agent_sessions.analysis.report import WeeklyReport, week_start
+from agent_sessions.analysis.search import search_archive, render_search
+from agent_sessions.analysis.continuity import (
+    compile_handoff, write_bundle, audit_bundle, pin_requirement, review_requirement,
+    link_challenge, load_requirements, note_source_inspection,
+)
+from agent_sessions.analysis.inspection import inspection_report, render_inspection
+from agent_sessions.analysis.suggestions import suggest_requirements
+from agent_sessions.analysis.selection_import import prepare_selection_review, import_selection_review
+from agent_sessions.analysis.captured_files import recover_captured_adds
+from agent_sessions.analysis.family import (
+    ALLOWED_SIGNAL_KINDS,
+    DEFAULT_MAX_PIN_SUGGESTIONS,
+    DEFAULT_MAX_QUOTE_CHARS,
+    build_family_digest,
+    evaluate_required_signals,
+    materialize_pin_suggestions,
+    render_family_digest,
+)
+from agent_sessions.topic_review import prepare_topic_review, import_topic_review, mutate_topic_requirements
+from agent_sessions.skill_bundle import continuation_skill
 from agent_sessions.reconcile import reconcile
+from agent_sessions.history import inspect_history, latest_changes, read_revision
+from agent_sessions.workspace import (
+    default_workspace, initialize_workspace, load_workspace, add_topic, set_topic, get_topic, resume_topic,
+    topic_history_directory,
+)
 from agent_sessions.models import Session
 from agent_sessions.hook_setup import install_hooks
 from agent_sessions.parsers import PARSERS
@@ -198,9 +229,10 @@ def cmd_bulk(args: argparse.Namespace) -> None:
                 continue
             groups.setdefault(key, []).append(path)
         for group in groups.values():
+            diagnostics = {}
             try:
-                session = (CodexParser.parse_many(group) if agent_name == "codex"
-                           else parser_cls.parse(group[0]))
+                session = (CodexParser.parse_many(group, diagnostics=diagnostics) if agent_name == "codex"
+                           else parser_cls.parse(group[0], diagnostics=diagnostics))
             except (OSError, UnicodeError) as error:
                 coverage.extend({"agent": agent_name, "source_path": str(path),
                                  "status": "error", "error_type": type(error).__name__}
@@ -221,17 +253,23 @@ def cmd_bulk(args: argparse.Namespace) -> None:
                 "session_id": session.id if session else None,
                 "date": session.date_str if session else None,
                 "date_source": session.date_source if session else "unknown",
+                "record_counts": diagnostics.get(str(path), {}),
             } for path in group)
 
     if getattr(args, "coverage", False) and not args.dry_run:
         coverage_text = json.dumps({
-            "version": 1, "source_files": len(coverage),
+            "version": 2, "source_files": len(coverage),
             "exported_sessions": total, "sources": coverage,
         }, indent=2) + "\n"
         with directory_lock(out_dir, timeout=getattr(args, "lock_timeout", DEFAULT_LOCK_TIMEOUT)):
             atomic_write_text(out_dir / "coverage.json", coverage_text)
 
     print(f"\nExported {total} sessions to {out_dir}")
+    affected = sum(bool(row.get("record_counts", {}).get("malformed", 0)
+                        or row.get("record_counts", {}).get("unsupported", 0)) for row in coverage)
+    if affected:
+        print(f"Coverage warning: {affected} source file(s) contain malformed or unsupported records. "
+              "Run doctor or enable --coverage for details.", file=sys.stderr)
     errors = sum(row["status"] == "error" for row in coverage)
     if errors:
         print(f"Could not read {errors} source file(s). Check coverage.json when enabled.", file=sys.stderr)
@@ -241,45 +279,24 @@ def cmd_bulk(args: argparse.Namespace) -> None:
 # ── Search command ──────────────────────────────────────────────────────────
 
 def cmd_search(args: argparse.Namespace) -> None:
-    search_dir = Path(args.directory) if args.directory else resolve_output_dir(None)
-    pattern = re.compile(args.query, re.IGNORECASE)
-    hits = 0
+    directory = Path(args.directory).expanduser() if args.directory else Path.home() / ".agent-sessions" / "exports"
+    report = search_archive(directory, args.query, match=args.match, limit=args.limit,
+                            agent=args.agent, projects=getattr(args, 'projects', None), since=args.since,
+                            until=args.until, role=args.role, view=args.view)
+    print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_search(report))
 
-    # Search the JSON index first (fast path)
-    json_idx = search_dir / "sessions.json"
-    if json_idx.exists():
-        try:
-            data = json.loads(json_idx.read_text())
-            sessions = data.get("sessions", []) if isinstance(data, dict) else data
-            for entry in sessions:
-                searchable = f"{entry.get('title','')} {entry.get('summary','')} {entry.get('branch','')}"
-                if pattern.search(searchable):
-                    agent = entry.get("agent", "?")
-                    date = entry.get("date", "?")
-                    title = entry.get("title", "?")[:80]
-                    duration = entry.get("duration_human", "?")
-                    print(f"  [{agent}] {date}  {duration:>8s}  {title}")
-                    print(f"           → {entry.get('file', '?')}")
-                    hits += 1
-        except json.JSONDecodeError:
-            pass
 
-    if hits == 0:
-        # Fallback: grep through markdown files
-        for md in sorted(search_dir.glob("*.md"), reverse=True):
-            if md.name == "SESSION_INDEX.md":
-                continue
-            content = md.read_text(encoding="utf-8", errors="replace")
-            if pattern.search(content):
-                first_line = content.split("\n")[0].lstrip("# ").strip()
-                print(f"  {first_line[:80]}")
-                print(f"           → {md.name}")
-                hits += 1
-
-    if hits == 0:
-        print("No matches.")
+def cmd_index(args: argparse.Namespace) -> None:
+    directory = Path(args.directory).expanduser() if args.directory else Path.home() / ".agent-sessions" / "exports"
+    report = search_archive(directory, rebuild=args.rebuild, projects=args.projects, view=args.view)
+    if args.json:
+        print(json.dumps(report, indent=2))
     else:
-        print(f"\n{hits} session(s) matched.")
+        counts = report['index']
+        print(f"Search index: {counts['sessions']} sessions / {counts['passages']} passages; "
+              f"{counts['updated']} updated, {counts['unchanged']} unchanged, {counts['removed']} removed.")
+        for warning in counts['warnings']:
+            print(f"Warning: {warning['code']} / {warning['session_id']}")
 
 
 # ── Stats command ───────────────────────────────────────────────────────────
@@ -503,7 +520,7 @@ def cmd_context(args: argparse.Namespace) -> None:
     directory = Path(args.directory) if args.directory else Path.home() / ".agent-sessions" / "exports"
     try:
         builder = build_handoff if args.format == "handoff" else build_context
-        text = builder(directory, args.query, args.last, args.max_chars)
+        text = builder(directory, args.query, args.last, args.max_chars, projects=getattr(args, 'projects', None))
     except ValueError as error:
         raise StorageError(str(error)) from error
     if args.output:
@@ -513,6 +530,327 @@ def cmd_context(args: argparse.Namespace) -> None:
         print(f"Context pack → {out}")
     else:
         print(text, end="")
+
+
+def cmd_family(args: argparse.Namespace) -> None:
+    directory = Path(args.directory) if args.directory else Path.home() / ".agent-sessions" / "exports"
+    profile = args.profile or "balanced"
+    profile_signal_kinds = None
+    profile_pin_signal_kinds = None
+    profile_focus_bonus = args.focus_priority_bonus
+    if profile == "questions":
+        profile_signal_kinds = ["open_question", "scope_boundary"]
+        profile_pin_signal_kinds = ["open_question"]
+        profile_focus_bonus = max(profile_focus_bonus, 20)
+    elif profile == "blockers":
+        profile_signal_kinds = ["reported_blocker", "next_action", "scope_boundary"]
+        profile_pin_signal_kinds = ["reported_blocker", "next_action"]
+        profile_focus_bonus = max(profile_focus_bonus, 25)
+    elif profile == "strict":
+        profile_signal_kinds = ["scope_boundary", "reported_blocker", "open_question", "next_action"]
+        profile_pin_signal_kinds = ["scope_boundary", "reported_blocker", "open_question", "next_action"]
+        profile_focus_bonus = max(profile_focus_bonus, 20)
+    profile_min_priority = args.min_signal_priority
+    if profile == "strict":
+        profile_min_priority = max(profile_min_priority, 90)
+    report = build_family_digest(
+        directory,
+        args.session_id,
+        max_quote_chars=args.max_quote_chars,
+        max_signals=args.max_signals,
+        max_pin_suggestions=args.max_pin_suggestions,
+        signal_kinds=args.signal_kinds or profile_signal_kinds,
+        pin_signal_kinds=args.pin_signal_kinds or profile_pin_signal_kinds,
+        focus_priority_bonus=profile_focus_bonus,
+        min_signal_priority=profile_min_priority,
+    )
+    report["signal_profile"] = profile
+    required_check = None
+    if args.require_signal_kinds:
+        required_check = evaluate_required_signals(report, args.require_signal_kinds)
+        report["required_signals"] = required_check
+    if required_check is not None and not required_check["passed"] and (
+        args.requirements_out or args.bundle_out
+    ):
+        text = json.dumps(report, indent=2, ensure_ascii=False) + "\n" if args.json else render_family_digest(report)
+        if args.output:
+            out = Path(args.output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(out, text)
+            print(f"Family digest → {out}")
+        else:
+            print(text, end="")
+        missing = ", ".join(required_check["missing"])
+        print(
+            f"agent-sessions: required signal kind(s) missing: {missing}. "
+            "Refused requirements/bundle generation.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if args.requirements_out:
+        generated = materialize_pin_suggestions(
+            directory,
+            report,
+            Path(args.requirements_out),
+            overwrite=args.overwrite_requirements,
+        )
+        report["generated_requirements"] = generated
+    requirements_path = Path(args.requirements_out).expanduser() if args.requirements_out else None
+    if args.bundle_out:
+        bundle = Path(args.bundle_out).expanduser()
+        if requirements_path is None:
+            requirements_path = bundle.parent / f"{args.session_id}.family-requirements.json"
+            generated = materialize_pin_suggestions(directory, report, requirements_path, overwrite=True)
+            report["generated_requirements"] = generated
+        query = args.query if args.query else f"family:{args.session_id}"
+        handoff, manifest = compile_handoff(
+            directory,
+            query,
+            requirements_path,
+            last=args.last,
+            max_chars=args.max_chars,
+            max_total_chars=args.max_total_chars,
+        )
+        write_bundle(bundle, handoff, manifest)
+        report["family_bundle"] = dict(
+            path=str(bundle),
+            query=query,
+            ready=manifest["ready"],
+            verification=manifest.get("verification", "not_checked"),
+        )
+        if args.audit_family_bundle:
+            audit = audit_bundle(bundle, directory)
+            report["family_bundle"]["audit"] = audit
+    text = json.dumps(report, indent=2, ensure_ascii=False) + "\n" if args.json else render_family_digest(report)
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(out, text)
+        print(f"Family digest → {out}")
+        if args.requirements_out:
+            print(f"Family requirements → {args.requirements_out}")
+        if args.bundle_out:
+            print(f"Family handoff bundle → {args.bundle_out}")
+    else:
+        print(text, end="")
+        if args.requirements_out and not args.json:
+            print(f"\nGenerated requirements: {args.requirements_out}")
+        if args.bundle_out and not args.json:
+            print(f"Family handoff bundle: {args.bundle_out}")
+    if required_check is not None and not required_check["passed"] and not (
+        args.requirements_out or args.bundle_out
+    ):
+        raise SystemExit(1)
+
+
+def _workspace_directory(args):
+    return Path(args.workspace).expanduser() if args.workspace else default_workspace()
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    root = _workspace_directory(args)
+    config = initialize_workspace(root, Path(args.archive))
+    print(json.dumps(config, indent=2) if args.json else f"Private workspace → {root}\nArchive → {config['archive']}")
+
+
+def cmd_topic(args: argparse.Namespace) -> None:
+    workspace = _workspace_directory(args)
+    if args.topic_command in ('pin', 'link', 'review', 'acknowledge'):
+        def operation(archive, requirements, topic):
+            projects = topic.get('projects')
+            if args.topic_command == 'pin':
+                return pin_requirement(archive, requirements, args.id, args.session, args.section,
+                                       args.quote, unit=args.unit, projects=projects)
+            if args.topic_command == 'link':
+                return link_challenge(archive, requirements, args.id, args.target, args.session, args.section,
+                                      args.quote, args.note, unit=args.unit, projects=projects)
+            if args.topic_command == 'review':
+                return review_requirement(archive, requirements, args.id, args.candidate, args.note, projects=projects)
+            return note_source_inspection(archive, requirements, args.session, args.snapshot, args.note, projects=projects)
+        result = mutate_topic_requirements(workspace, args.name, operation)
+        print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else
+              f"{args.topic_command.capitalize()} recorded for {args.name}. Evidence remains not checked.")
+        return
+    if args.topic_command in ('prepare-review', 'import-review'):
+        if args.topic_command == 'prepare-review':
+            result = prepare_topic_review(workspace, args.name, max_prompt_chars=args.max_prompt_chars, batch_review=args.batch_review,
+                                          compact_review=args.compact_review, max_total_prompt_chars=args.max_total_prompt_chars, view=args.view)
+        else:
+            result = import_topic_review(workspace, args.name, Path(args.packet).expanduser(), Path(args.answer).expanduser())
+        print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else
+              json.dumps(result, ensure_ascii=False))
+        if result.get('status') == 'over_budget':
+            raise SystemExit(1)
+        return
+    if args.topic_command == 'list':
+        _, config = load_workspace(workspace)
+        if args.json:
+            print(json.dumps(config['topics'], indent=2, ensure_ascii=False))
+        elif not config['topics']:
+            print('No saved topics. Use topic add NAME --query TEXT.')
+        else:
+            for name, topic in sorted(config['topics'].items()):
+                boundary = json.dumps(topic['projects'], ensure_ascii=False) if topic.get('projects') else 'all indexed sources'
+                print(f"{name}: {topic['query']} / metadata scope: {boundary}")
+    elif args.topic_command == 'add':
+        topic = add_topic(workspace, args.name, args.query, requirements=args.requirements,
+                          limits=dict(last=args.last, max_chars=args.max_chars, max_total_chars=args.max_total_chars),
+                          projects=args.projects)
+        print(json.dumps(topic, indent=2) if args.json else f"Saved topic {args.name}. Pin evidence with topic pin {args.name}.")
+    elif args.topic_command == 'set':
+        limits = {key: getattr(args, key) for key in ('last', 'max_chars', 'max_total_chars')
+                  if getattr(args, key) is not None}
+        topic = set_topic(workspace, args.name, query=args.query, limits=limits,
+                          projects=[] if args.all_projects else args.projects)
+        print(json.dumps(topic, indent=2) if args.json else f"Updated topic {args.name}. Evidence requirements remain linked.")
+    else:
+        _, archive, topic = get_topic(workspace, args.name)
+        requirements = Path(topic['requirements'])
+        if args.topic_command == 'search':
+            report = search_archive(archive, args.query or topic['query'], match=args.match, limit=args.limit,
+                                    projects=topic.get('projects'), view=args.view)
+            print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_search(report))
+        elif args.topic_command == 'inspect':
+            contract = load_requirements(requirements)
+            report = inspection_report(archive, contract.get('source_inspections', []),
+                                       projects=topic.get('projects'), session_id=args.session,
+                                       changed_only=args.changed_only)
+            print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else render_inspection(report), end='\n' if args.json else '')
+        elif args.topic_command == 'history':
+            history = inspect_history(topic_history_directory(workspace, args.name))
+            if args.json:
+                print(json.dumps(history, indent=2))
+            else:
+                print('Historical captures. Recorded readiness does not establish current validity.')
+                for item in history['revisions']:
+                    status = 'ready at capture' if item['ready'] else 'draft at capture'
+                    marker = ' / head' if item['id'] == history['head'] else ''
+                    print(f"{item['id']} / {status}{marker}")
+                if not history['revisions']:
+                    print('No captures yet. Run resume NAME first.')
+        elif args.topic_command == 'changes':
+            report = latest_changes(topic_history_directory(workspace, args.name), include_diff=args.diff)
+            if args.json:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            else:
+                print('Changes between captured handoffs. Historical evidence remains not checked.')
+                for key, value in report['changes'].items():
+                    if value or key in ('readiness_before', 'readiness_after'):
+                        print(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+                if args.diff:
+                    print(report['diff'], end='')
+        elif args.topic_command == 'show':
+            text, manifest = read_revision(topic_history_directory(workspace, args.name), args.revision)
+            if args.json:
+                print(json.dumps(dict(historical=True, verification='not_checked', revision=args.revision,
+                                      handoff=text, manifest=manifest), indent=2, ensure_ascii=False))
+            else:
+                print('Historical capture. Audit against current exports before use.\n')
+                print(text, end='')
+
+
+def cmd_resume(args: argparse.Namespace) -> None:
+    report, text = resume_topic(_workspace_directory(args), args.name)
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    elif args.print_context and report['ready']:
+        print(text, end='')
+    else:
+        stream = sys.stderr if args.print_context else sys.stdout
+        status = 'Ready' if report['ready'] else 'Draft — review required'
+        print(f"{status}: {report['handoff_path']}", file=stream)
+        scope = report['manifest']['scope']
+        inspection = report['manifest']['source_inspection']
+        if inspection['pending']:
+            print(f"  {inspection['pending']} source(s) have no current inspection note. "
+                  f"Use topic inspect {args.name}. This queue is independent of readiness.", file=stream)
+        if scope['projects']:
+            print(f"  Project metadata scope: {scope['in_scope_sources']} matching sessions, "
+                  f"{scope['excluded_sources']} excluded, {scope['missing_project_metadata']} without project metadata.", file=stream)
+        history = report['history']
+        if history['changed'] and history['previous_revision']:
+            changes = history['changes']
+            print(f"  Since previous capture: {len(changes['requirements_changed'])} requirement change(s), "
+                  f"{len(changes['review_opened'])} new review candidate(s).", file=stream)
+            if changes['scope_changed']:
+                print('  The declared project metadata boundary changed.', file=stream)
+        if not report['ready'] and report['last_ready_handoff_path']:
+            print(f"  Previous ready capture retained for historical inspection: {report['last_ready_handoff_path']}", file=stream)
+        for item in report['manifest']['requirements']:
+            if item['status'] != 'covered':
+                print(f"  {item['id']}: {item['status']}", file=stream)
+            for candidate in item.get('unreviewed_candidates', []):
+                print(f"  {item['id']}: review candidate {candidate['review_id']} ({candidate['kind']})", file=stream)
+        if not report['manifest']['total_budget_passed']:
+            print('  The complete handoff exceeds the saved total character limit.', file=stream)
+        for warning in report['manifest']['relationship_scan_warnings']:
+            print(f"  Archive scan incomplete: {warning['code']}", file=stream)
+    if not report['ready']:
+        raise SystemExit(1)
+
+
+def cmd_handoff(args: argparse.Namespace) -> None:
+    if args.handoff_command == 'import-review':
+        report = import_selection_review(Path(args.packet).expanduser(), Path(args.answer).expanduser(),
+                                         Path(args.output).expanduser())
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+    directory = Path(args.directory).expanduser() if args.directory else Path.home() / ".agent-sessions" / "exports"
+    if args.handoff_command == 'suggest':
+        report = suggest_requirements(directory, args.query, projects=args.projects,
+                                      limit=args.limit, max_paragraph_chars=args.max_paragraph_chars)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    elif args.handoff_command == 'prepare-review':
+        report = prepare_selection_review(directory, Path(args.output).expanduser(), args.query,
+                                          projects=args.projects, max_prompt_chars=args.max_prompt_chars, batch_review=args.batch_review,
+                                          compact_review=args.compact_review, max_total_prompt_chars=args.max_total_prompt_chars, view=args.view)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        if report.get('status') == 'over_budget':
+            raise SystemExit(1)
+    elif args.handoff_command == 'pin':
+        anchor = pin_requirement(directory, Path(args.output).expanduser(), args.id,
+                                 args.session, args.section, args.quote, unit=args.unit, projects=args.projects, view=args.view)
+        print(json.dumps(anchor, indent=2, ensure_ascii=False) if args.json else
+              f"Pinned {anchor['id']}: {anchor['session_id']} / section {anchor['section']}")
+    elif args.handoff_command == 'link':
+        anchor = link_challenge(directory, Path(args.requirements).expanduser(), args.id, args.target,
+                                args.session, args.section, args.quote, args.note, unit=args.unit,
+                                projects=args.projects)
+        print(json.dumps(anchor, indent=2, ensure_ascii=False) if args.json else
+              f"Linked {anchor['id']} as a challenge to {anchor['challenge_for']}. Review remains pending.")
+    elif args.handoff_command == 'review':
+        review = review_requirement(directory, Path(args.requirements).expanduser(), args.id, args.candidate, args.note, projects=args.projects)
+        print(json.dumps(review, indent=2) if args.json else
+              f"Review note recorded for {review['requirement_id']} / {review['candidate_id']}. Statements remain not checked.")
+    elif args.handoff_command == 'build':
+        text, manifest = compile_handoff(directory, args.query, Path(args.requirements),
+                                         last=args.last, max_chars=args.max_chars, max_total_chars=args.max_total_chars,
+                                         projects=args.projects)
+        output = Path(args.output).expanduser()
+        write_bundle(output, text, manifest)
+        if args.json:
+            print(json.dumps(manifest, indent=2, ensure_ascii=False))
+        else:
+            status = 'PASS' if manifest['ready'] else 'FAIL — draft only'
+            print(f"Handoff readiness: {status}. Bundle → {output}")
+            for item in manifest['requirements']:
+                print(f"  {item['id']}: {item['status']}")
+                for candidate in item.get('unreviewed_candidates', []):
+                    print(f"    Review required: {candidate['kind']} / {candidate['witness']['session_id']}")
+        if not manifest['ready']:
+            raise SystemExit(1)
+    elif args.handoff_command == 'audit':
+        report = audit_bundle(Path(args.bundle).expanduser(), directory)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print('Handoff evidence: ' + ('current' if report['coverage_passed'] else 'needs review'))
+            for finding in report['findings']:
+                print('  ' + json.dumps(finding))
+        if report['exit_code']:
+            raise SystemExit(report['exit_code'])
+    else:
+        raise ValueError('Use handoff pin, handoff build, or handoff audit.')
 
 
 def cmd_reconcile(args: argparse.Namespace) -> None:
@@ -542,6 +880,32 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     print(json.dumps(report, indent=2) if args.json else render_doctor(report))
     if report["exit_code"]:
         sys.exit(report["exit_code"])
+
+
+def cmd_restore(args: argparse.Namespace) -> None:
+    report = recover_captured_adds(args.source, args.source_root, args.output)
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        files = report["files"]
+        current = report["current_comparison"]
+        print(f"Recovered {len(files)} file(s) to {report['output']}.")
+        print("Current project comparison: " + ", ".join(
+            f"{count} {status}" for status, count in current.items()))
+        print(f"Captured updates applied exactly: {report['exact_updates_applied']}; "
+              f"blocked paths: {report['blocked_update_paths']}; "
+              f"failed operations skipped: {report['failed_operations_skipped']}.")
+        print(f"Execution verified: {'yes' if report['execution_verified'] else 'no'}; "
+              f"latest state verified: {'yes' if report['latest_state_verified'] else 'no'}.")
+        for item in files:
+            status = item["current_status"].upper()
+            if item["status"] == "captured_prefix":
+                status += ", CAPTURED PREFIX"
+            if item["execution_status"] != "confirmed_success":
+                status += f", EXECUTION {item['execution_status'].upper()}"
+            print(f"[{status}] {item['path']}")
+        for item in report["deleted_files"]:
+            print(f"[CAPTURED DELETION, EXECUTION {item['execution_status'].upper()}] {item['path']}")
 
 
 # ── Install command ─────────────────────────────────────────────────────────
@@ -632,6 +996,16 @@ def positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError("Use a positive integer")
 
 
+def non_negative_int(value: str) -> int:
+    try:
+        result = int(value)
+        if result < 0:
+            raise ValueError
+        return result
+    except ValueError:
+        raise argparse.ArgumentTypeError("Use a non-negative integer")
+
+
 def lock_timeout(value: str) -> float:
     try:
         result = float(value)
@@ -648,6 +1022,98 @@ def main() -> None:
         description="Universal AI agent session exporter",
     )
     sub = parser.add_subparsers(dest="command")
+
+    p_init = sub.add_parser("init", help="Create private workspace state outside Git checkouts")
+    p_init.add_argument("--archive", required=True, help="Explicit local export archive")
+    p_init.add_argument("--workspace", help="Private workspace directory (default: ~/.agent-sessions/workspace)")
+    p_init.add_argument("--json", action="store_true")
+
+    p_topic = sub.add_parser("topic", help="Save queries and evidence requirements for repeated use")
+    topic_commands = p_topic.add_subparsers(dest="topic_command", required=True)
+    p_topics = topic_commands.add_parser("list", help="List saved topics without changing files")
+    p_topics.add_argument("--workspace")
+    p_topics.add_argument("--json", action="store_true")
+    p_add_topic = topic_commands.add_parser("add", help="Save a topic query and handoff limits")
+    p_add_topic.add_argument("name")
+    p_add_topic.add_argument("--query", required=True)
+    p_add_topic.add_argument("--requirements", help="Reuse an explicit existing requirements file")
+    p_add_topic.add_argument("--last", type=positive_int, default=5)
+    p_add_topic.add_argument("--max-chars", type=positive_int, default=DEFAULT_MAX_CHARS)
+    p_add_topic.add_argument("--max-total-chars", type=positive_int, default=64_000)
+    p_add_topic.add_argument("--workspace")
+    p_add_topic.add_argument("--json", action="store_true")
+    p_add_topic.add_argument("--project", dest="projects", action="append", help="Exact cwd or project slug. Repeat for explicit aliases.")
+    p_set_topic = topic_commands.add_parser("set", help="Change a saved query or limit without replacing its evidence requirements")
+    p_set_topic.add_argument("name")
+    p_set_topic.add_argument("--query")
+    p_set_topic.add_argument("--last", type=positive_int)
+    p_set_topic.add_argument("--max-chars", type=positive_int)
+    p_set_topic.add_argument("--max-total-chars", type=positive_int)
+    p_set_topic.add_argument("--workspace")
+    p_set_topic.add_argument("--json", action="store_true")
+    project_scope = p_set_topic.add_mutually_exclusive_group()
+    project_scope.add_argument("--project", dest="projects", action="append", help="Replace the project selectors. Repeat for explicit aliases.")
+    project_scope.add_argument("--all-projects", action="store_true", help="Explicitly clear the project metadata boundary")
+    for action in ('history', 'changes', 'show'):
+        command = topic_commands.add_parser(action, help=f"{action.capitalize()} private captured handoffs")
+        command.add_argument("name")
+        command.add_argument("--workspace")
+        command.add_argument("--json", action="store_true")
+        if action == 'changes':
+            command.add_argument("--diff", action="store_true", help="Include a unified diff of historical handoff text")
+        elif action == 'show':
+            command.add_argument("--revision", required=True, help="Complete revision hash from topic history")
+    for action in ('prepare-review', 'import-review'):
+        command = topic_commands.add_parser(action, help=f"{action.capitalize()} source-bound assistant evidence for a saved topic")
+        command.add_argument("name")
+        command.add_argument("--workspace")
+        command.add_argument("--json", action="store_true")
+        if action == 'prepare-review':
+            command.add_argument("--view", choices=("dialogue", "evidence"), default=None)
+            command.add_argument("--max-prompt-chars", type=positive_int, default=32000)
+            command.add_argument("--batch-review", action="store_true", help="Split evidence into at most 32 bounded review prompts")
+            command.add_argument("--compact-review", action="store_true", help="Use exact text references only when the complete plan is smaller without extra omissions")
+            command.add_argument("--max-total-prompt-chars", type=positive_int, help="Do not publish a packet when routing plus all prompts exceed this explicit input budget")
+        else:
+            command.add_argument("packet")
+            command.add_argument("--answer", required=True)
+    for action in ('search', 'pin', 'link', 'review', 'inspect', 'acknowledge'):
+        command = topic_commands.add_parser(action, help=f"{action.capitalize()} a saved topic's evidence")
+        command.add_argument("name")
+        command.add_argument("--workspace")
+        command.add_argument("--json", action="store_true")
+        if action == 'search':
+            command.add_argument("--view", choices=("dialogue", "evidence"), default="dialogue")
+            command.add_argument("query", nargs="?", help="Words to find (default: the saved topic query)")
+            command.add_argument("--match", choices=("all", "any", "phrase"), default="all")
+            command.add_argument("--limit", type=positive_int, default=10)
+        elif action == 'inspect':
+            command.add_argument("--session", help="Show current cleaned dialogue and its inspection snapshot id")
+            command.add_argument("--changed-only", action="store_true", help="Omit complete sections unchanged since the last inspection note")
+        elif action == 'acknowledge':
+            command.add_argument("--session", required=True)
+            command.add_argument("--snapshot", required=True, help="Exact inspection snapshot id from topic inspect")
+            command.add_argument("--note", required=True, help="Operator inspection note. Does not resolve challenges or prove understanding.")
+        else:
+            command.add_argument("--id", required=True)
+            if action in ('pin', 'link'):
+                command.add_argument("--session", required=True)
+                command.add_argument("--section", type=positive_int, required=True)
+                command.add_argument("--quote", required=action == 'link')
+                command.add_argument("--unit", choices=("section", "paragraph"), default="section")
+                if action == 'link':
+                    command.add_argument("--target", required=True, help="Existing requirement challenged by this passage")
+                    command.add_argument("--note", required=True, help="Why this passage challenges the target. Not acceptance.")
+            else:
+                command.add_argument("--candidate", required=True)
+                command.add_argument("--note", required=True)
+
+    p_resume = sub.add_parser("resume", help="Rebuild a saved topic's handoff and report readiness")
+    p_resume.add_argument("name")
+    p_resume.add_argument("--workspace")
+    resume_format = p_resume.add_mutually_exclusive_group()
+    resume_format.add_argument("--json", action="store_true")
+    resume_format.add_argument("--print", dest="print_context", action="store_true", help="Print handoff text only when all readiness gates pass")
 
     # hook (stdin-driven, used by Stop hooks)
     p_hook = sub.add_parser("hook", help="Hook entry point (reads JSON from stdin)")
@@ -678,8 +1144,25 @@ def main() -> None:
 
     # search
     p_search = sub.add_parser("search", help="Search exported sessions")
-    p_search.add_argument("query", help="Search term (regex)")
+    p_search.add_argument("query", help="Words to find in conversation passages (no regex or query operators)")
     p_search.add_argument("-d", "--directory", help="Directory to search in")
+    p_search.add_argument("--match", choices=("all", "any", "phrase"), default="all")
+    p_search.add_argument("--limit", type=positive_int, default=10, help="Maximum passages (1–100)")
+    p_search.add_argument("--agent", choices=list(PARSERS))
+    p_search.add_argument("--project", dest="projects", action="append", help="Exact project slug or working directory. Repeat for explicit aliases.")
+    p_search.add_argument("--since", type=iso_date)
+    p_search.add_argument("--until", type=iso_date, help="Exclusive end date")
+    p_search.add_argument("--role", choices=("user", "assistant", "tool", "system"))
+    p_search.add_argument("--view", choices=("dialogue", "evidence"), default="dialogue",
+                          help="Evidence includes code, tool output, and phase-tagged messages with raw-source locators")
+    p_search.add_argument("--json", action="store_true", help="Structured hits with source hashes and quote offsets")
+
+    p_index = sub.add_parser("index", help="Refresh the local passage search cache")
+    p_index.add_argument("-d", "--directory", help="Export archive directory")
+    p_index.add_argument("--rebuild", action="store_true", help="Replace only the derived search cache")
+    p_index.add_argument("--view", choices=("dialogue", "evidence"), default="dialogue")
+    p_index.add_argument("--json", action="store_true")
+    p_index.add_argument("--project", dest="projects", action="append", help="Exact project metadata selector. Repeat for aliases.")
 
     # stats
     p_stats = sub.add_parser("stats", help="Show aggregate session stats")
@@ -726,6 +1209,182 @@ def main() -> None:
     p_context.add_argument("--max-chars", type=positive_int, default=DEFAULT_MAX_CHARS, help="Excerpt character budget per source (default: 24000)")
     p_context.add_argument("--format", choices=("excerpts", "handoff"), default="excerpts", help="Output format (default: excerpts)")
     p_context.add_argument("-o", "--output", help="Write the pack to a local file")
+    p_context.add_argument("--project", dest="projects", action="append", help="Exact cwd or project slug. Repeat for explicit aliases.")
+    p_family = sub.add_parser(
+        "family",
+        help="Build a cited lineage digest from exported parent_id links",
+    )
+    p_family.add_argument("session_id", help="Focus session ID already present in the archive index")
+    p_family.add_argument("-d", "--directory", help="Exported sessions directory")
+    p_family.add_argument(
+        "--max-quote-chars",
+        type=positive_int,
+        default=DEFAULT_MAX_QUOTE_CHARS,
+        help=f"Maximum characters per quoted turn (default: {DEFAULT_MAX_QUOTE_CHARS})",
+    )
+    p_family.add_argument(
+        "--max-signals",
+        type=non_negative_int,
+        default=8,
+        help="Maximum continuation signals per family member (default: 8; 0 disables)",
+    )
+    p_family.add_argument(
+        "--max-pin-suggestions",
+        type=non_negative_int,
+        default=DEFAULT_MAX_PIN_SUGGESTIONS,
+        help=f"Maximum suggested handoff pins in output (default: {DEFAULT_MAX_PIN_SUGGESTIONS}; 0 disables)",
+    )
+    p_family.add_argument(
+        "--signal-kind",
+        dest="signal_kinds",
+        action="append",
+        choices=ALLOWED_SIGNAL_KINDS,
+        help="Restrict extracted continuation signals to this kind; repeatable",
+    )
+    p_family.add_argument(
+        "--pin-signal-kind",
+        dest="pin_signal_kinds",
+        action="append",
+        choices=ALLOWED_SIGNAL_KINDS,
+        help="Restrict suggested pins to this signal kind; repeatable",
+    )
+    p_family.add_argument(
+        "--focus-priority-bonus",
+        type=non_negative_int,
+        default=15,
+        help="Additional priority score for focus-session suggestions (default: 15)",
+    )
+    p_family.add_argument(
+        "--min-signal-priority",
+        type=non_negative_int,
+        default=0,
+        help="Drop extracted signals below this priority score (default: 0)",
+    )
+    p_family.add_argument(
+        "--profile",
+        choices=("balanced", "questions", "blockers", "strict"),
+        default="balanced",
+        help="Preset signal and pin policy (default: balanced)",
+    )
+    p_family.add_argument(
+        "--require-signal-kind",
+        dest="require_signal_kinds",
+        action="append",
+        choices=ALLOWED_SIGNAL_KINDS,
+        help="Fail when this signal kind is absent from the family; repeatable",
+    )
+    p_family.add_argument(
+        "--requirements-out",
+        help="Write a dialogue requirements contract from suggested pins",
+    )
+    p_family.add_argument(
+        "--overwrite-requirements",
+        action="store_true",
+        help="Replace an existing requirements file when used with --requirements-out",
+    )
+    p_family.add_argument(
+        "--bundle-out",
+        help="Write a handoff bundle generated from family suggested pins",
+    )
+    p_family.add_argument(
+        "--query",
+        help="Query label used when compiling --bundle-out (default: family:<session_id>)",
+    )
+    p_family.add_argument(
+        "--last",
+        type=positive_int,
+        default=5,
+        help="Maximum sources when compiling --bundle-out (default: 5)",
+    )
+    p_family.add_argument(
+        "--max-chars",
+        type=positive_int,
+        default=DEFAULT_MAX_CHARS,
+        help=f"Source excerpt character budget for --bundle-out (default: {DEFAULT_MAX_CHARS})",
+    )
+    p_family.add_argument(
+        "--max-total-chars",
+        type=positive_int,
+        default=120_000,
+        help="Total handoff character budget for --bundle-out (default: 120000)",
+    )
+    p_family.add_argument(
+        "--audit-family-bundle",
+        action="store_true",
+        help="Run handoff audit immediately after writing --bundle-out",
+    )
+    p_family.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of Markdown")
+    p_family.add_argument("-o", "--output", help="Write the digest to a local file")
+    sub.add_parser("skill", help="Print the packaged assistant continuation skill without installing or changing configuration")
+
+    p_handoff = sub.add_parser("handoff", help="Build and audit handoffs against required source evidence")
+    handoff_commands = p_handoff.add_subparsers(dest="handoff_command", required=True)
+    p_suggest = handoff_commands.add_parser("suggest", help="Read-only evidence proposals for assistant review; never accepts requirements")
+    p_suggest.add_argument("query")
+    p_suggest.add_argument("-d", "--directory", help="Existing private export archive")
+    p_suggest.add_argument("--project", dest="projects", action="append", help="Exact cwd or project slug. Enables same-scope candidate expansion.")
+    p_suggest.add_argument("--limit", type=positive_int, default=10)
+    p_suggest.add_argument("--max-paragraph-chars", type=positive_int, default=2000)
+    p_prepare_review = handoff_commands.add_parser("prepare-review", help="Create a private, version-bound source packet for assistant selection")
+    p_prepare_review.add_argument("query")
+    p_prepare_review.add_argument("--view", choices=("dialogue", "evidence"), default="dialogue")
+    p_prepare_review.add_argument("-d", "--directory")
+    p_prepare_review.add_argument("-o", "--output", required=True)
+    p_prepare_review.add_argument("--project", dest="projects", action="append")
+    p_prepare_review.add_argument("--max-prompt-chars", type=positive_int, default=32000)
+    p_prepare_review.add_argument("--compact-review", action="store_true", help="Use exact text references only when the complete plan is smaller without extra omissions")
+    p_prepare_review.add_argument("--max-total-prompt-chars", type=positive_int, help="Do not publish a packet when routing plus all prompts exceed this explicit input budget")
+    p_prepare_review.add_argument("--batch-review", action="store_true", help="Split evidence into at most 32 bounded review prompts")
+    p_import_review = handoff_commands.add_parser("import-review", help="Validate assistant-selected quotes and create a new requirements contract")
+    p_import_review.add_argument("packet")
+    p_import_review.add_argument("--answer", required=True)
+    p_import_review.add_argument("-o", "--output", required=True)
+    p_pin = handoff_commands.add_parser("pin", help="Require an exact source quote in future handoffs")
+    p_pin.add_argument("--id", required=True, help="Meaningful requirement name, such as discovery-only")
+    p_pin.add_argument("--session", required=True)
+    p_pin.add_argument("--section", required=True, type=positive_int)
+    p_pin.add_argument("--view", choices=("dialogue", "evidence"), default="dialogue",
+                       help="Coordinate system; evidence uses raw message numbers from evidence search")
+    p_pin.add_argument("--quote", help="Exact quote (default: entire selected section/message)")
+    p_pin.add_argument("--unit", choices=("section", "paragraph"), default="section", help="Required evidence unit (default: section)")
+    p_pin.add_argument("-d", "--directory", help="Export archive directory")
+    p_pin.add_argument("-o", "--output", required=True, help="Private requirements JSON to create or append")
+    p_pin.add_argument("--json", action="store_true")
+    p_pin.add_argument("--project", dest="projects", action="append", help="Exact cwd or project slug. Repeat for explicit aliases.")
+    p_link = handoff_commands.add_parser("link", help="Pin an operator-selected challenge to an existing requirement")
+    p_link.add_argument("--requirements", required=True)
+    p_link.add_argument("--id", required=True, help="New challenge evidence requirement id")
+    p_link.add_argument("--target", required=True, help="Existing requirement challenged by this passage")
+    p_link.add_argument("--session", required=True)
+    p_link.add_argument("--section", required=True, type=positive_int)
+    p_link.add_argument("--quote", required=True)
+    p_link.add_argument("--note", required=True, help="Why this passage challenges the target. Not acceptance.")
+    p_link.add_argument("--unit", choices=("section", "paragraph"), default="section")
+    p_link.add_argument("-d", "--directory", help="Export archive directory")
+    p_link.add_argument("--json", action="store_true")
+    p_link.add_argument("--project", dest="projects", action="append", help="Exact cwd or project slug. Repeat for explicit aliases.")
+    p_review = handoff_commands.add_parser("review", help="Record a review note for a recognized or operator-linked challenge")
+    p_review.add_argument("--requirements", required=True)
+    p_review.add_argument("--id", required=True, help="Requirement id")
+    p_review.add_argument("--candidate", required=True, help="Review id from a draft manifest")
+    p_review.add_argument("--note", required=True, help="Operator explanation. Does not grant authorization.")
+    p_review.add_argument("-d", "--directory", help="Export archive directory")
+    p_review.add_argument("--json", action="store_true")
+    p_review.add_argument("--project", dest="projects", action="append", help="Exact cwd or project slug. Repeat for explicit aliases.")
+    p_build = handoff_commands.add_parser("build", help="Keep required evidence or fail the coverage gate")
+    p_build.add_argument("query")
+    p_build.add_argument("--requirements", required=True, help="Local evidence requirements JSON")
+    p_build.add_argument("-o", "--output", required=True, help="Private output bundle directory")
+    p_build.add_argument("-d", "--directory", help="Export archive directory")
+    p_build.add_argument("--last", type=positive_int, default=5)
+    p_build.add_argument("--max-chars", type=positive_int, default=DEFAULT_MAX_CHARS)
+    p_build.add_argument("--max-total-chars", type=positive_int, default=64_000, help="Maximum complete handoff characters (default: 64000)")
+    p_build.add_argument("--json", action="store_true")
+    p_build.add_argument("--project", dest="projects", action="append", help="Exact cwd or project slug. Repeat for explicit aliases.")
+    p_audit = handoff_commands.add_parser("audit", help="Read-only check of retained anchors and source freshness")
+    p_audit.add_argument("bundle")
+    p_audit.add_argument("-d", "--directory", help="Current export archive directory")
+    p_audit.add_argument("--json", action="store_true")
 
     p_reconcile = sub.add_parser("reconcile", help="Export only missing or changed local sessions")
     p_reconcile.add_argument("--agent", choices=list(PARSERS), help="Only this agent (default: all installed)")
@@ -746,22 +1405,32 @@ def main() -> None:
     p_install.add_argument("-o", "--output", help="Private export directory for Codex/Cursor hooks")
     p_install.add_argument("--dry-run", action="store_true", help="Inspect Codex/Cursor setup without writes")
 
+    p_restore = sub.add_parser("restore", help="Recover captured additions and exact-base updates into a new private directory")
+    p_restore.add_argument("source", nargs="+", help="Ordered Codex JSONL files, or one directory for automatic discovery")
+    p_restore.add_argument("--source-root", required=True, help="Existing or absent historical path root to retain")
+    p_restore.add_argument("-o", "--output", required=True, help="New private output directory outside Git")
+    p_restore.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     if args.command == "bulk" and args.since and args.until and args.since >= args.until:
         parser.error("--until must be after --since")
 
     commands = {
+        "init": cmd_init, "topic": cmd_topic, "resume": cmd_resume,
+        "skill": lambda args: print(continuation_skill(), end=''),
         "hook": cmd_hook, "export": cmd_export, "bulk": cmd_bulk,
-        "search": cmd_search, "stats": cmd_stats, "distill": cmd_distill,
+        "search": cmd_search, "index": cmd_index, "stats": cmd_stats, "distill": cmd_distill,
         "link": cmd_link, "to-obsidian": cmd_to_obsidian, "report": cmd_report,
-        "reconcile": cmd_reconcile, "context": cmd_context, "doctor": cmd_doctor, "install": cmd_install,
+        "reconcile": cmd_reconcile, "handoff": cmd_handoff, "context": cmd_context,
+        "family": cmd_family, "doctor": cmd_doctor,
+        "install": cmd_install, "restore": cmd_restore,
     }
     if args.command not in commands:
         parser.print_help()
         return
     try:
         commands[args.command](args)
-    except StorageError as error:
+    except (StorageError, ValueError, OSError) as error:
         parser.exit(1, f"agent-sessions: {error}\n")
 
 

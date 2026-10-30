@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "synthetic_only": true,
+  "query": "example cache",
+  "title": "Example cache discovery",
+  "prefix": "The example cache needs technical discovery.\n",
+  "detail": "Synthetic design details remain under review. ",
+  "repeat": 90,
+  "required_quote": "Discovery only. Do not implement or publish.",
+  "budgets": [3000, 6000, 12000]
+}

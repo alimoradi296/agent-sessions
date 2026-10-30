@@ -24,3 +24,6 @@ agent-sessions = "agent_sessions.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["agent_sessions*"]
+
+[tool.setuptools.package-data]
+agent_sessions = ["skills/agent-sessions-continuation/SKILL.md"]

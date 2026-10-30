@@ -3,6 +3,9 @@
 A structured handoff groups selected conversation claims and retains their evidence excerpts.
 It does not decide which historical statements are correct or authorize work in a new session.
 
+For required evidence and later source audits, use [the handoff requirements workflow](continuity.md).
+The original `context --format handoff` command remains a query-selected, read-only prototype.
+
 ## Generate a handoff
 
 ```bash
@@ -105,3 +108,8 @@ The command performs no semantic conflict detection. It cannot resolve unquoted 
 Historical requests and proposed actions do not replace current authorization.
 The fresh-session evaluation must stay separate from these source-content checks.
 Synthetic regression tests establish grouping and evidence behavior. They do not establish successful understanding by a new agent.
+
+For captured tool content, use a separate [evidence-view handoff contract](raw-evidence-handoffs.md).
+It requires complete raw exported messages, using evidence-search message numbers.
+Default contracts and default assistant-selection refresh use cleaned dialogue.
+Explicit evidence-view review retains whole exported messages, including tool content.

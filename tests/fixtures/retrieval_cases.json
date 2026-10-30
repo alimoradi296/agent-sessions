@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "synthetic_only": true,
+  "purpose": "Small manually labeled lexical-retrieval set. It does not establish semantic retrieval or production quality.",
+  "sources": [
+    {"id": "synthetic-retry", "agent": "codex", "text": "Decision: The cache retry limit is three attempts. Retry count is explicit."},
+    {"id": "synthetic-isolation", "agent": "claude", "text": "Decision: Queue isolation keeps image tasks away from fast requests."},
+    {"id": "synthetic-scope", "agent": "cursor", "text": "Discovery only. Do not implement or publish. The draft needs review."},
+    {"id": "synthetic-timing", "agent": "codex", "text": "Correction: The timing target is a proposal, not a guarantee."},
+    {"id": "synthetic-removals", "agent": "cursor", "text": "Open question: Should manual removals survive synchronization? No decision is established."},
+    {"id": "synthetic-deployment", "agent": "claude", "text": "A passed local check is not deployment proof. The deployed revision remains unknown."},
+    {"id": "synthetic-persian", "agent": "codex", "text": "تصمیم: صف محلی برای کارهای تصویر استفاده شود."},
+    {"id": "synthetic-lock", "agent": "claude", "text": "Decision: An atomic replacement keeps each export file complete after interruption."},
+    {"id": "synthetic-distractor-a", "agent": "codex", "text": "Review the cache color palette and typography. This concerns presentation only."},
+    {"id": "synthetic-distractor-b", "agent": "cursor", "text": "The retry button uses a rounded border. This concerns presentation only."},
+    {"id": "synthetic-distractor-c", "agent": "claude", "text": "The queue diagram belongs in the architecture guide. No scheduling change is proposed."},
+    {"id": "synthetic-distractor-d", "agent": "codex", "text": "The image caption describes an example export. The caption is not an execution record."}
+  ],
+  "queries": [
+    {"query": "cache retry", "expected_session": "synthetic-retry"},
+    {"query": "queue isolation", "expected_session": "synthetic-isolation"},
+    {"query": "discovery publish", "expected_session": "synthetic-scope"},
+    {"query": "timing guarantee", "expected_session": "synthetic-timing"},
+    {"query": "manual removals", "expected_session": "synthetic-removals"},
+    {"query": "deployment proof", "expected_session": "synthetic-deployment"},
+    {"query": "تصمیم صف", "expected_session": "synthetic-persian"},
+    {"query": "atomic interruption", "expected_session": "synthetic-lock"}
+  ]
+}

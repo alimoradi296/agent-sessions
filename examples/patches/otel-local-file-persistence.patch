@@ -1,0 +1,76 @@
+--- a/otel_hook.py
++++ b/otel_hook.py
+@@ -2777,8 +2777,12 @@
+                             if attributes.get("gen_ai.client.session_id") != self._expected_session_key:
+                                 continue
+                         fh.write(json.dumps(_span_to_dict(span), ensure_ascii=True, default=str) + "\n")
++            _record_delivery_health("local_spans", True)
+             return SpanExportResult.SUCCESS
+         except OSError as exc:
++            if not os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
++                _EXPORT_FAILURES.add("traces")
++            _record_delivery_health("local_spans", False, exc)
+             _LOGGER.debug("file span exporter write failed: %s", exc)
+             return SpanExportResult.FAILURE
+ 
+@@ -6270,7 +6274,7 @@
+         elif traces.get("last_success_at_ns"):
+             exporter_status = "healthy_recent"
+     elif _local_spans_enabled():
+-        exporter_status = "local_only"
++        exporter_status = "failing_recent" if signal_failed_recently("local_spans") else "local_only"
+ 
+     failures = []
+     for signal, record in signal_health.items():
+--- /dev/null
++++ b/tests/test_file_persistence.py
+@@ -0,0 +1,49 @@
++"""File-only export failures must remain pending and visible to doctor."""
++
++import pytest
++import otel_hook as hook
++
++
++def test_failed_authoritative_file_export_marks_trace_failure(monkeypatch, tmp_path):
++    assert hook._load_otel_modules()
++    monkeypatch.setenv('OTEL_EXPORTER_OTLP_ENDPOINT', '')
++    failures = set()
++    health = []
++    monkeypatch.setattr(hook, '_EXPORT_FAILURES', failures)
++    monkeypatch.setattr(hook, '_record_delivery_health', lambda *args: health.append(args))
++    obstruction = tmp_path / 'not-a-directory'
++    obstruction.write_text('Authored obstruction.')
++    result = hook._FileSpanExporter(str(obstruction / 'session.jsonl')).export([])
++    assert result == hook.SpanExportResult.FAILURE
++    assert 'traces' in failures
++    assert health and health[-1][0:2] == ('local_spans', False)
++
++
++def test_optional_file_failure_keeps_remote_authority(monkeypatch, tmp_path):
++    assert hook._load_otel_modules()
++    monkeypatch.setenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://127.0.0.1:4317')
++    failures = set()
++    health = []
++    monkeypatch.setattr(hook, '_EXPORT_FAILURES', failures)
++    monkeypatch.setattr(hook, '_record_delivery_health', lambda *args: health.append(args))
++    obstruction = tmp_path / 'not-a-directory'
++    obstruction.write_text('Authored obstruction.')
++    result = hook._FileSpanExporter(str(obstruction / 'session.jsonl')).export([])
++    assert result == hook.SpanExportResult.FAILURE
++    assert not failures
++    assert health and health[-1][0:2] == ('local_spans', False)
++
++
++def test_doctor_reports_recent_file_only_failure(monkeypatch, tmp_path):
++    monkeypatch.setenv('OTEL_EXPORTER_OTLP_ENDPOINT', '')
++    monkeypatch.setenv('IDE_OTEL_LOCAL_SPANS', 'true')
++    monkeypatch.setattr(hook, '_load_config', lambda: {})
++    monkeypatch.setattr(hook, '_load_delivery_health', lambda: {'signals': {'local_spans': {
++        'last_failure_at_ns': 2, 'last_success_at_ns': 1}}})
++    monkeypatch.setattr(hook, '_registered_hook_events', lambda *args: ['postToolUse'])
++    monkeypatch.setattr(hook, '_pending_state_summary', lambda: {'state_directory_writable': True})
++    monkeypatch.setattr(hook, '_detect_ide', lambda *args: 'cursor')
++    report, status = hook._doctor_report(('cursor',), False, str(tmp_path))
++    assert status == 1
++    assert report['status'] == 'degraded'
++    assert report['exporter']['status'] == 'failing_recent'

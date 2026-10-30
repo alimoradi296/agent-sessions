@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from agent_sessions.parsers.records import read_records
+
 from agent_sessions.models import (
     Agent,
     Message,
@@ -67,51 +69,40 @@ class CursorParser:
         return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
 
     @classmethod
-    def parse(cls, path: Path) -> Optional[Session]:
+    def parse(cls, path: Path, diagnostics=None) -> Optional[Session]:
         session_id = path.stem
         messages: list[Message] = []
         title = "Cursor Session"
         first_user_text: Optional[str] = None
         aborted = False
 
-        with open(path) as f:
-            for line_number, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(d, dict):
+        for line_number, d in read_records(path, "cursor", diagnostics):
+            role = d.get("role")
+            event_type = d.get("type")
+
+            if role in ("user", "assistant"):
+                message = d.get("message") or {}
+                text, tools, results = _extract_content(message.get("content", "") if isinstance(message, dict) else "")
+                if not text and not tools and not results:
                     continue
 
-                role = d.get("role")
-                event_type = d.get("type")
+                if role == "user" and first_user_text is None and text:
+                    first_user_text = text
 
-                if role in ("user", "assistant"):
-                    message = d.get("message") or {}
-                    text, tools, results = _extract_content(message.get("content", "") if isinstance(message, dict) else "")
-                    if not text and not tools and not results:
-                        continue
+                if text or tools:
+                    messages.append(Message(
+                        role=role, text=text, tool_calls=tools,
+                        source_path=str(path), source_line=line_number,
+                    ))
+                if results:
+                    messages.append(Message(
+                        role="tool", text="", tool_results=results,
+                        source_path=str(path), source_line=line_number,
+                    ))
 
-                    if role == "user" and first_user_text is None and text:
-                        first_user_text = text
-
-                    if text or tools:
-                        messages.append(Message(
-                            role=role, text=text, tool_calls=tools,
-                            source_path=str(path), source_line=line_number,
-                        ))
-                    if results:
-                        messages.append(Message(
-                            role="tool", text="", tool_results=results,
-                            source_path=str(path), source_line=line_number,
-                        ))
-
-                elif event_type == "turn_ended":
-                    if d.get("status") == "aborted":
-                        aborted = True
+            elif event_type == "turn_ended":
+                if d.get("status") == "aborted":
+                    aborted = True
 
         if not messages:
             return None

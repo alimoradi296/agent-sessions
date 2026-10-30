@@ -118,11 +118,14 @@ def build_graph(distilled: list[dict]) -> SessionGraph:
         seen_edges.add(key)
         graph.edges.append(GraphEdge(source=source, target=target, edge_type=edge_type, label=label))
 
-    # forked_from edges
+    # Preserve the distinct native parent relationship for Codex subagents.
     for d in distilled:
         parent = d.get("parent_id")
         if parent and parent in by_id:
-            add_edge(d["session_id"], parent, "forked_from", "rewind/branch")
+            if d.get("agent") == "codex":
+                add_edge(d["session_id"], parent, "spawned_from", "subagent")
+            else:
+                add_edge(d["session_id"], parent, "forked_from", "rewind/branch")
 
     # same PRD edges
     prd_to_sessions: dict[str, list[str]] = {}

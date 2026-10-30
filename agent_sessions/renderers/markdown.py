@@ -17,7 +17,8 @@ class MarkdownRenderer:
         lines.append(f"**Agent:** {session.agent.value}")
         lines.append(f"**Session ID:** `{session.id}`")
         if session.parent_id:
-            lines.append(f"**Forked from:** `{session.parent_id}` (rewind/branch)")
+            relation = "Spawned by" if session.agent.value == "codex" else "Forked from"
+            lines.append(f"**{relation}:** `{session.parent_id}`")
         lines.append(f"**Branch:** `{session.branch}`")
         if session.project_slug:
             lines.append(f"**Project slug:** `{session.project_slug}` (source directory name)")
@@ -32,6 +33,10 @@ class MarkdownRenderer:
         if session.duration_human != "unknown":
             lines.append(f"**Duration:** {session.duration_human}")
         lines.append(f"**Messages:** {session.user_message_count} user / {session.assistant_message_count} assistant")
+
+        records = session.tool_record_counts
+        lines.append(f"**Parsed tool records:** {records['calls']} calls ({records['calls_with_id']} with IDs) / "
+                     f"{records['results']} results ({records['results_with_id']} with IDs)")
 
         if session.usage.total_tokens > 0:
             u = session.usage
@@ -79,7 +84,8 @@ class MarkdownRenderer:
 
             for tr in msg.tool_results:
                 call_ref = f" (call `{tr.call_id}`)" if tr.call_id else ""
-                lines.append(f"\n*[Tool result]*{call_ref}")
+                error_flag = f" [is_error: {str(tr.is_error).lower()}]" if type(tr.is_error) is bool else ""
+                lines.append(f"\n*[Tool result]*{call_ref}{error_flag}")
                 lines.append("\n" + _code_block(tr.content))
 
             lines.append("")

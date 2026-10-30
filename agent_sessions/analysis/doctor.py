@@ -164,7 +164,17 @@ class Doctor:
         found = set()
         for group in groups.values():
             try:
-                session = CodexParser.parse_many(group) if agent == 'codex' else parser.parse(group[0])
+                diagnostics = {}
+                session = (CodexParser.parse_many(group, diagnostics=diagnostics) if agent == 'codex'
+                           else parser.parse(group[0], diagnostics=diagnostics))
+                for source_path, counts in diagnostics.items():
+                    for key, value in counts.items():
+                        self.counts['source_' + key] += value
+                    if counts['malformed'] or counts['unsupported']:
+                        self.add('warning', 'source_record_coverage',
+                                 f"Record coverage: {counts['malformed']} malformed, "
+                                 f"{counts['unsupported']} unsupported. Export completeness is uncertain.",
+                                 agent=agent, path=source_path, record_counts=counts)
                 if session is None:
                     self.counts['sources_without_messages'] += len(group)
                     continue

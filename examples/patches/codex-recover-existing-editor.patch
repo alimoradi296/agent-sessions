@@ -1,0 +1,114 @@
+--- a/src/patch.ts
++++ b/src/patch.ts
+@@ -1,3 +1,23 @@
++import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs"
++import { tmpdir } from "node:os"
++import { join, basename } from "node:path"
++import { spawnSync } from "node:child_process"
++import { createHash } from "node:crypto"
++
++let checkedEditor: string | undefined
++const editorPath = (): string => {
++  const path = process.env.AGENT_SESSIONS_PATCH_EDITOR
++  if (!path || basename(path) !== "apply_patch") throw new Error("Explicit pinned apply_patch editor is required")
++  if (checkedEditor !== path) {
++    const digest = createHash("sha256").update(readFileSync(path)).digest("hex")
++    if (digest !== "b93f6811d3f653f0fb83be4050d857fb9abbb111dfa2ce160563327daff7f306") {
++      throw new Error("Editor fingerprint differs from the tested helper")
++    }
++    checkedEditor = path
++  }
++  return path
++}
++
+ import type { PatchDocument, PatchOperation } from "./domain.ts"
+ 
+ export interface PatchParseResult {
+@@ -171,22 +191,31 @@
+   content: string,
+   patchText: string
+ ): { readonly ok: true; readonly content: string } | { readonly ok: false; readonly message: string } => {
+-  const hadTrailingNewline = content.endsWith("\n")
+-  const lines = hadTrailingNewline ? content.slice(0, -1).split("\n") : content.split("\n")
+-  let cursor = 0
+-  const hunks = parseUpdateHunks(patchText)
+-  if (hunks.length === 0) {
+-    return { ok: false, message: "update patch had no replayable hunks" }
+-  }
+-
+-  for (const hunk of hunks) {
+-    const index = indexOfSubsequence(lines, hunk.oldLines, cursor)
+-    if (index < 0) {
+-      return { ok: false, message: "update hunk context did not match known content" }
+-    }
+-    lines.splice(index, hunk.oldLines.length, ...hunk.newLines)
+-    cursor = index + hunk.newLines.length
+-  }
+-
+-  return { ok: true, content: `${lines.join("\n")}${hadTrailingNewline ? "\n" : ""}` }
+-}
++  let temporary: string | undefined
++  try {
++    const editor = editorPath()
++    const lines = patchText.replace(/\r\n/g, "\n").split("\n")
++    if (!lines[0]?.startsWith("*** Update File: ")) return { ok: false, message: "One update operation required" }
++    // Path parsing and state tracking remain in the existing recovery engine.
++    // Only the single operation body reaches the editor in a fresh scratch directory.
++    const body = lines.slice(1).filter(line => !line.startsWith("*** Move to: "))
++    if (body.every(line => line === "" || line === "*** End of File")) {
++      return { ok: false, message: "update patch had no replayable hunks" }
++    }
++    if (body.some(line => line.startsWith("***") && line !== "*** End of File")) {
++      return { ok: false, message: "Unsupported operation directive in update body" }
++    }
++    temporary = mkdtempSync(join(tmpdir(), "agent-sessions-editor-replay-"))
++    writeFileSync(join(temporary, "candidate.txt"), content, { mode: 0o600 })
++    const text = body.join("\n")
++    const patch = "*** Begin Patch\n*** Update File: candidate.txt\n" + text + (text.endsWith("\n") ? "" : "\n") + "*** End Patch\n"
++    const result = spawnSync(editor, [], { cwd: temporary, input: patch, encoding: "utf8", timeout: 20000,
++      maxBuffer: 1024 * 1024, env: { HOME: temporary, PATH: "/usr/bin:/bin", LANG: "C.UTF-8" } })
++    if (result.error || result.status !== 0) return { ok: false, message: "Existing editor refused replay" }
++    return { ok: true, content: readFileSync(join(temporary, "candidate.txt"), "utf8") }
++  } catch {
++    return { ok: false, message: "Pinned editor replay unavailable" }
++  } finally {
++    if (temporary) rmSync(temporary, { recursive: true, force: true })
++  }
++}
+--- /dev/null
++++ b/tests/patch-editor-bridge.test.ts
+@@ -0,0 +1,34 @@
++import { expect, test } from "bun:test"
++import { applyUpdatePatch } from "../src/patch.ts"
++
++test("existing editor retains the function selector", () => {
++  expect(applyUpdatePatch("def first():\n    return 1\n\ndef second():\n    return 1\n",
++    "*** Update File: example.py\n@@ def second():\n-    return 1\n+    return 2\n"))
++    .toEqual({ ok: true, content: "def first():\n    return 1\n\ndef second():\n    return 2\n" })
++})
++
++test("existing editor retains the end-of-file selector", () => {
++  expect(applyUpdatePatch("value = 1\nseparator\nvalue = 1\n",
++    "*** Update File: example.py\n@@\n-value = 1\n+value = 2\n*** End of File\n"))
++    .toEqual({ ok: true, content: "value = 1\nseparator\nvalue = 2\n" })
++})
++
++test("payload trailing spaces survive framing", () => {
++  expect(applyUpdatePatch("old  \n", "*** Update File: example.txt\n@@\n-old  \n+new  \n"))
++    .toEqual({ ok: true, content: "new  \n" })
++})
++
++test("an absent explicit editor refuses replay", () => {
++  const previous = process.env.AGENT_SESSIONS_PATCH_EDITOR
++  delete process.env.AGENT_SESSIONS_PATCH_EDITOR
++  try {
++    expect(applyUpdatePatch("old\n", "*** Update File: example.txt\n@@\n-old\n+new\n").ok).toBe(false)
++  } finally {
++    if (previous !== undefined) process.env.AGENT_SESSIONS_PATCH_EDITOR = previous
++  }
++})
++
++test("an injected extra operation refuses replay", () => {
++  expect(applyUpdatePatch("old\n", "*** Update File: example.txt\n*** Delete File: other.txt\n@@\n-old\n+new\n").ok)
++    .toBe(false)
++})

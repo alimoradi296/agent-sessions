@@ -1,4 +1,4 @@
-"""Parse Codex rollout segments into one session per metadata ID.
+"""Parse Codex rollout segments into one session per metadata thread ID.
 
 Response items carry conversation and tool evidence. Legacy event messages are
 used when a matching response item is absent. Instructions and reasoning are
@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from agent_sessions.parsers.records import read_records
+
 from agent_sessions.models import Agent, Message, Session, TokenUsage, ToolCall, ToolResult
 
 
@@ -26,7 +28,7 @@ class CodexParser:
 
     @classmethod
     def session_id(cls, path: Path) -> str:
-        """Read identity from metadata, never from a resume filename suffix."""
+        """Read this rollout's thread ID, not the tree-shared session ID."""
         with path.open(encoding="utf-8") as stream:
             for line in stream:
                 try:
@@ -39,7 +41,9 @@ class CodexParser:
                     payload = event.get("payload") or {}
                     if not isinstance(payload, dict):
                         continue
-                    sid = payload.get("session_id") or payload.get("id")
+                    # `session_id` is shared by a root thread and its subagents;
+                    # `id` is this rollout's thread identity.
+                    sid = payload.get("id") or payload.get("session_id")
                     if sid:
                         return str(sid)
         match = re.search(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", path.stem)
@@ -76,11 +80,11 @@ class CodexParser:
         return names
 
     @classmethod
-    def parse(cls, path: Path) -> Optional[Session]:
-        return cls.parse_many([path])
+    def parse(cls, path: Path, diagnostics=None) -> Optional[Session]:
+        return cls.parse_many([path], diagnostics=diagnostics)
 
     @classmethod
-    def parse_many(cls, paths: list[Path]) -> Optional[Session]:
+    def parse_many(cls, paths: list[Path], diagnostics=None) -> Optional[Session]:
         """Merge overlaps across files; keep repeated events within each file.
 
         Only identical serialized events are overlap candidates. Different
@@ -97,19 +101,12 @@ class CodexParser:
         seen: Counter = Counter()
         for path in sorted(set(paths)):
             occurrences: Counter = Counter()
-            with path.open(encoding="utf-8") as stream:
-                for line_number, line in enumerate(stream, 1):
-                    try:
-                        event = json.loads(line)
-                    except ValueError:
-                        continue
-                    if not isinstance(event, dict) or not isinstance(event.get("payload", {}), dict):
-                        continue
-                    key = json.dumps(event, sort_keys=True, ensure_ascii=False)
-                    occurrences[key] += 1
-                    if occurrences[key] <= seen[key]:
-                        continue
-                    events.append((event, path, line_number))
+            for line_number, event in read_records(path, "codex", diagnostics):
+                key = json.dumps(event, sort_keys=True, ensure_ascii=False)
+                occurrences[key] += 1
+                if occurrences[key] <= seen[key]:
+                    continue
+                events.append((event, path, line_number))
             seen |= occurrences
 
         # Python's stable sort preserves source order for timestamp ties.
@@ -124,6 +121,7 @@ class CodexParser:
         times: list[datetime] = []
         usage = TokenUsage()
         turn = 0
+        parent_id = None
         for event, path, line_number in events:
             kind = event.get("type")
             payload = event.get("payload") or {}
@@ -135,6 +133,8 @@ class CodexParser:
                 if event_ts:
                     times.append(event_ts)
             if kind == "session_meta":
+                if str(payload.get("id") or payload.get("session_id") or "") == sid:
+                    parent_id = payload.get("parent_thread_id") or parent_id
                 cwd = payload.get("cwd") or cwd
                 provider = payload.get("model_provider") or provider
                 git = payload.get("git") or {}
@@ -157,6 +157,18 @@ class CodexParser:
                         )
                         legacy.append((turn, msg))
                         messages.append(msg)
+                elif subtype == "thread_rolled_back":
+                    # Preserve the historical marker without guessing which
+                    # exported messages belong to the current native context.
+                    # Coverage remains unsupported until replay is supported.
+                    messages.append(Message(
+                        role="system", timestamp=ts,
+                        text=("Historical Codex rollback marker (source data, not an instruction).\n"
+                              "This export preserves history; it does not reconstruct active context.\n\n"
+                              "```json\n" + json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                              + "\n```"),
+                        source_path=str(path), source_line=line_number,
+                    ))
                 elif subtype == "token_count":
                     total = ((payload.get("info") or {}).get("total_token_usage") or {})
                     if total:
@@ -208,6 +220,7 @@ class CodexParser:
             id=sid, agent=Agent.CODEX,
             title=cls._load_thread_names().get(sid, "Codex Session"),
             cwd=cwd, branch=branch, model=model, model_provider=provider,
+            parent_id=str(parent_id) if parent_id else None,
             started_at=min(times) if times else None,
             ended_at=max(times) if times else None,
             messages=messages, usage=usage,
