@@ -4,9 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-sessions"
-version = "0.2.0"
-description = "Local Python session exporter for Claude Code, Codex, and Cursor. Search transcripts, extract cited claims, and build structured handoffs."
-keywords = ["claude-code", "codex", "cursor", "session-exporter", "transcripts", "local-first"]
+version = "0.3.0"
+description = "Local-first CLI that exports Claude Code, Codex, and Cursor sessions, then builds cited family digests and auditable handoffs without uploading your transcripts."
+keywords = [
+  "claude-code",
+  "codex",
+  "cursor",
+  "session-exporter",
+  "transcripts",
+  "local-first",
+  "handoff",
+  "privacy",
+  "developer-tools",
+]
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

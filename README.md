@@ -1,101 +1,100 @@
-# agent-sessions — Claude Code, Codex, and Cursor session exporter
+# agent-sessions
 
-A local Python CLI to export, search, and build cited handoffs from AI coding-agent transcripts.
-Includes archive diagnostics, selective reconciliation, and claim extraction with source references.
-It can also recover complete captured `Add File` bodies and exact-base updates that survive inside direct or orchestrated Codex patch records.
-Captured deletions become explicit tombstones instead of leaving obsolete files in the recovered output.
-Linked tool results distinguish confirmed success, confirmed failure, and unknown execution; failed operations
-are skipped instead of being replayed as if they succeeded. The private manifest includes source line references
-for each linked result and any skipped failure.
+<p align="center">
+  <img src="docs/assets/hero.jpg" alt="agent-sessions: local session memory for Claude Code, Codex, and Cursor" width="920" />
+</p>
 
-Find a past engineering exchange, pin its critical constraints, and build a handoff that must retain them.
-A read-only audit detects changed selected evidence, edited bundles, and new explicit quoted challenges across agents.
-Coverage checks retained evidence. It does not establish that a statement is true or that an agent understood it.
+<p align="center">
+  <strong>Local session memory for Claude Code, Codex, and Cursor.</strong><br/>
+  Export transcripts, recover forked/spawned families, pin hard constraints, and build auditable handoffs — without uploading your chats.
+</p>
 
-[Try the context-loss example](docs/continuity.md) · [Session family digest](docs/family-digest.md) · [Product hypothesis and related tools](docs/product-direction.md)
+<p align="center">
+  <a href="https://github.com/alimoradi296/agent-sessions/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-0b3d2e" alt="MIT license" /></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-1f6f5a" alt="Python 3.10+" /></a>
+  <a href="docs/privacy.md"><img src="https://img.shields.io/badge/privacy-local--first-c4b59a" alt="Local-first privacy" /></a>
+  <a href="https://github.com/alimoradi296/agent-sessions"><img src="https://img.shields.io/badge/deps-stdlib%20only-243039" alt="Python stdlib only" /></a>
+</p>
 
-For repeated use, save a topic once and rebuild its handoff with `agent-sessions resume <topic>`.
-Private capture history preserves earlier packs and shows changes when evidence or review state changes.
-See [the private workspace guide](docs/workspace.md) for setup, evidence pins, and review.
-Assistants can collect cited candidate paragraphs with `handoff suggest` before choosing pins.
-These [automatic proposals](docs/automatic-evidence.md) remain unaccepted and never certify readiness or complete discovery.
-The assistant can [batch-import selected evidence](docs/assistant-selection-import.md) from a private review packet with source and review checks.
-Optional `--compact-review` preserves each source occurrence while reducing repeated text when the complete plan benefits; otherwise it keeps the ordinary packet.
-For repeated use, [topic review refresh](docs/topic-review-refresh.md) preserves explicit pins and prior captures while updating generated selections.
-The [bundled continuation skill](docs/continuation-skill.md) lets an assistant run this sequence without asking you to select passages.
+<p align="center">
+  <img src="docs/assets/workflow.svg" alt="Export to family signals to pinned requirements to audited handoff" width="920" />
+</p>
 
-Formerly `claude-session-exporter`. The canonical repository is [alimoradi296/agent-sessions](https://github.com/alimoradi296/agent-sessions).
+Formerly `claude-session-exporter`. Canonical repo: [alimoradi296/agent-sessions](https://github.com/alimoradi296/agent-sessions).
 
-The CLI writes one Markdown file per session ID, a readable index, and a JSON index.
-Repeated exports update the same session file. Optional commands extract decisions and connect related sessions.
+**Status:** `0.3.0` source-installable CLI. Transcript formats and hooks depend on your installed agent version.
 
-**Status:** Source-installable `0.2.0` CLI. Transcript formats and hook support depend on the installed agent version.
+## Why developers use it
 
-Exports and analysis run locally with the Python standard library. These commands do not upload transcript data.
-Generated files can contain private conversations, source paths, code, and tool outputs.
-Keep output directories outside public repositories. Git ignore rules are an additional guard, not a redaction system.
+- **Stop losing constraints across agent turns.** `family` turns parent/fork/spawn links into a cited digest with continuation signals, pin templates, and optional one-command handoff bundles.
+- **Search your own history offline.** Grep-friendly Markdown plus `sessions.json` for machines. No cloud index.
+- **Keep evidence honest.** Pins quote exact dialogue with source coordinates. Audits check coverage. Ready never means “verified true.”
 
-For a bounded restoration, use `agent-sessions restore SOURCE [SOURCE ...] --source-root ROOT -o PRIVATE_OUTPUT`.
-The report separates missing, changed, matching, and non-regular current paths so recovery work can start with actual gaps.
-The historical source root may be absent, allowing reconstruction after a project directory was deleted.
-Multiple resumed-session files can be supplied in explicit chronological order.
-Alternatively, pass one raw-session directory to discover relevant timestamped JSONL segments automatically.
-The default terminal report lists each recovered path with its current state, execution evidence, and any blocked update prefix.
-The command executes no historical code and labels execution and latest-state status as unknown.
-See [captured file restoration](docs/captured-file-restoration.md) for supported evidence and refusal rules.
+Privacy is non-negotiable: analysis runs locally with the Python standard library and does not upload transcripts. Generated files can still contain private text — keep them out of Git. Read the [privacy contract](docs/privacy.md).
 
-See [roadmap.md](roadmap.md) for the current implementation status and planned work.
-Licensed under the [MIT License](LICENSE).
+[Sample export](#try-a-sample-export) · [Family digest](docs/family-digest.md) · [Continuity example](docs/continuity.md) · [Workspace](docs/workspace.md) · [Roadmap](roadmap.md)
 
-[Try a sample export](#try-a-sample-export) · [Export your sessions](#export-your-sessions) · [Limits and privacy](#limits-and-privacy)
-
-## Try a sample export
-
-Requirements: Python 3.10 or later.
+## Quick start (synthetic only)
 
 ```bash
 git clone https://github.com/alimoradi296/agent-sessions.git
 cd agent-sessions
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 python -m pip install -e .
 python examples/demo.py
+python examples/family_digest_demo.py --output-dir /tmp/agent-sessions-family-mvp
+agent-sessions family synthetic-family-child -d /tmp/agent-sessions-family-mvp/exports --profile strict \
+  --bundle-out /tmp/agent-sessions-family-mvp/bundle --audit-family-bundle
 ```
 
-The demo uses a synthetic transcript in this repository. It does not read your agent history or install hooks.
-It creates these files in `demo-output/`:
+Those commands invent sessions. They do not read your agent history or install hooks.
+
+## Headline workflow
 
 ```text
-demo-output/
-├── sample-session.md
-├── SESSION_INDEX.md
-└── sessions.json
+private exports  →  family digest + signals  →  requirements pins  →  handoff bundle + audit
 ```
 
-Search the exported conversation:
+```bash
+# After you export to a private directory (never commit this path):
+agent-sessions family <session-id> -d /path/to/private-exports --profile balanced \
+  --require-signal-kind scope_boundary \
+  --bundle-out /path/to/private-bundle --audit-family-bundle
+```
+
+Also available: cited claim extraction, topic/`resume` workspaces, captured-file restoration, archive doctor, selective reconciliation, and Obsidian export. Details below.
+
+<details>
+<summary><strong>Also included</strong> (expand)</summary>
+
+- Recover complete captured `Add File` bodies and exact-base Codex patch updates; deletions become tombstones
+- Distinguish confirmed success, confirmed failure, and unknown tool execution in restore manifests
+- Save a topic once and rebuild with `agent-sessions resume <topic>` in a private workspace
+- Assistant-oriented `handoff suggest` proposals remain unaccepted until you pin them
+- Bundled [continuation skill](docs/continuation-skill.md) for assistants that must keep citations
+
+</details>
+
+## Try a sample export
+
+Requirements: Python 3.10 or later. After the [quick start](#quick-start-synthetic-only) install:
 
 ```bash
+python examples/demo.py
 agent-sessions search "retry" -d demo-output
 agent-sessions stats -d demo-output
 ```
 
-Open `demo-output/sample-session.md` to inspect the conversation and session metadata.
+The demo writes synthetic files under `demo-output/` (`sample-session.md`, `SESSION_INDEX.md`, `sessions.json`). It does not read your agent history.
 
-## Inspect a forked or spawned family
-
-After exports exist, build a cited lineage digest from recorded `parent_id` links:
+### Inspect a forked or spawned family
 
 ```bash
 python examples/family_digest_demo.py --output-dir /tmp/agent-sessions-family-mvp
 agent-sessions family synthetic-family-child -d /tmp/agent-sessions-family-mvp/exports
 ```
 
-The demo uses invented sessions only. See [session family digest](docs/family-digest.md) for limits and the pin/audit follow-up.
-The digest also lists continuation-signal candidates (scope boundaries, blockers, open questions, next actions) so a forked task can resume with less manual scanning.
-It can also generate a ready-to-audit requirements contract directly from suggested pins via `--requirements-out`.
-It now supports one-command `--bundle-out` to generate a handoff bundle from family suggestions and optionally audit it.
-Signal filtering is configurable with `--signal-kind` and `--pin-signal-kind` for lower-noise workflows.
-Use `--require-signal-kind` to refuse bundle generation when a critical carry-over signal is missing.
+See [session family digest](docs/family-digest.md) for signal filters, `--requirements-out`, `--bundle-out`, `--audit-family-bundle`, profiles, and `--require-signal-kind` gates.
 
 ## Reuse a handoff topic
 
@@ -648,14 +647,22 @@ agent-sessions report --since 2026-07-01 -o ~/report.md
 
 ## Limits and privacy
 
-- Agent transcript formats can change. The parsers recognize the formats implemented in this checkout.
-- Cursor exports lack token usage and branch metadata in the parsed format. Missing token counts do not mean zero usage.
-- Session titles and extracted outcomes are metadata or heuristics. They do not prove completion or deployment.
-- Hook installation changes local agent settings. Verify hook support in your installed agent version before installation.
-- Exported transcripts can contain prompts, file paths, tool results, and sensitive project information.
-- The parser and export commands operate locally. Review generated files before sharing or committing them.
+Full contract: [docs/privacy.md](docs/privacy.md).
 
-The sample procedure verifies export, indexing, and search with synthetic data.
+- Commands run locally with the Python standard library. They do not upload transcript data.
+- Exports can contain prompts, secrets, paths, code, and tool output. Keep them outside public repositories.
+- `.gitignore` and `scripts/check_public_surface.py` are guards, not redactors. Review `git status` before every push.
+- Agent transcript formats can change. Parsers match the formats implemented in this checkout.
+- Cursor exports lack token usage and branch metadata in the parsed format. Missing token counts do not mean zero usage.
+- Session titles, signals, and extracted outcomes are heuristics. They do not prove completion, correctness, or authorization.
+- Hook installation changes local agent settings. Verify hook support in your installed agent version before installation.
+- Public demos and screenshots must use synthetic data only.
+
+```bash
+python3 scripts/check_public_surface.py
+```
+
+The sample procedure verifies export, indexing, search, and family flows with synthetic data.
 It does not certify every agent version or hook lifecycle.
 
 ## Project layout
@@ -664,9 +671,11 @@ It does not certify every agent version or hook lifecycle.
 agent_sessions/  Python package and CLI
   parsers/       Claude Code, Codex, and Cursor readers
   renderers/     Markdown and shared indexes
-  analysis/      Claims, context packs, handoffs, graphs, and reports
-docs/            Command behavior and limits
-examples/        Synthetic demo and fixture
+  analysis/      Claims, family digests, handoffs, graphs, and reports
+docs/            Command behavior, privacy contract, and assets
+docs/assets/     Public README images (no private transcripts)
+examples/        Synthetic demos and fixtures
+scripts/         Public-surface checks
 tests/           Synthetic regression checks
 roadmap.md       Implemented features and remaining work
 ```
@@ -685,3 +694,4 @@ python3 -m unittest discover -s tests -v
 
 Tests generate invented transcripts in temporary directories.
 Do not add real transcripts, exports, reports, or screenshots to tests or public demonstrations.
+Run `python3 scripts/check_public_surface.py` before publishing commits.

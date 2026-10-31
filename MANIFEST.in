@@ -1,9 +1,11 @@
 include README.md LICENSE roadmap.md pyproject.toml
 recursive-include docs *.md
+recursive-include docs/assets *.jpg *.svg *.png *.webp
 recursive-include examples *.py *.mjs *.cjs *.json
 recursive-include examples/patches *.patch *.md
 include examples/sample-session.jsonl
 include examples/otel-hook-requirements.txt
+include scripts/check_public_surface.py
 recursive-include tests *.py *.json
 recursive-include agent_sessions/skills *.md
 global-exclude __pycache__ *.py[cod] .DS_Store

@@ -32,3 +32,8 @@ reconcile-report*.json
 .agent-sessions-search-*
 handoff-bundles/
 handoff-requirements*.json
+*.family-requirements.json
+docs/assets/*.private.*
+# Local validation outputs and private scratch
+/tmp-as-*
+as-family-validation/
